@@ -9,18 +9,20 @@ if [[ "${1:-}" == "test" || "${1:-}" == "stress" ]]; then
     .build/checks "${1:-test}"
     exit
 fi
-app="build/Plot Viewer.app"
+app="build/Multi-view.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 xcrun swiftc -swift-version 5 -target "$target" -O -module-cache-path .build/module-cache \
-    Sources/*.swift -o "$app/Contents/MacOS/PlotViewer"
+    Sources/*.swift -o "$app/Contents/MacOS/MultiView"
+cp Icons/MultiView.icns "$app/Contents/Resources/MultiView.icns"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-    <key>CFBundleExecutable</key><string>PlotViewer</string>
-    <key>CFBundleIdentifier</key><string>local.plotviewer</string>
-    <key>CFBundleName</key><string>Plot Viewer</string>
-    <key>CFBundleDisplayName</key><string>Plot Viewer</string>
+    <key>CFBundleExecutable</key><string>MultiView</string>
+    <key>CFBundleIdentifier</key><string>local.multiview</string>
+    <key>CFBundleName</key><string>Multi-view</string>
+    <key>CFBundleDisplayName</key><string>Multi-view</string>
+    <key>CFBundleIconFile</key><string>MultiView</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>CFBundleVersion</key><string>1</string>

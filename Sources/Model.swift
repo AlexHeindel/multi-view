@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import ImageIO
 import PDFKit
+import UniformTypeIdentifiers
 
 enum Catalog {
     static let extensions: Set<String> = ["png", "jpg", "jpeg", "tif", "tiff", "pdf"]
@@ -63,10 +64,10 @@ final class Loader {
     let previews = NSCache<NSString, Raster>()
 
     private init() {
-        decoding.name = "Plot Viewer decoding"
+        decoding.name = "Multi-view decoding"
         decoding.maxConcurrentOperationCount = 2
         decoding.qualityOfService = .userInitiated
-        indexing.name = "Plot Viewer folder indexing"
+        indexing.name = "Multi-view folder indexing"
         indexing.maxConcurrentOperationCount = 2
         indexing.qualityOfService = .userInitiated
         previews.totalCostLimit = 64 * 1024 * 1024
@@ -132,8 +133,8 @@ final class Pane: ObservableObject, Identifiable {
         commandNumber += 1
     }
 
-    func open(_ folder: URL, refresh: Bool = false) {
-        let previous = refresh ? current : nil
+    func open(_ folder: URL, refresh: Bool = false, selecting selected: URL? = nil) {
+        let previous = selected ?? (refresh ? current : nil)
         let previousIndex = refresh ? index : 0
         cancelLoads()
         scan?.cancel()
@@ -169,6 +170,17 @@ final class Pane: ObservableObject, Identifiable {
         guard let folder else { return }
         Loader.shared.previews.removeAllObjects()
         open(folder, refresh: true)
+    }
+
+    func select(_ url: URL) {
+        let parent = url.deletingLastPathComponent()
+        if folder?.path == parent.path, let position = files.firstIndex(of: url) {
+            guard index != position else { return }
+            index = position
+            load()
+        } else {
+            open(parent, selecting: url)
+        }
     }
 
     func cancelLoads() {
@@ -362,6 +374,24 @@ final class WindowModel: ObservableObject {
         guard let window = NSApp.keyWindow else { return }
         panel.beginSheetModal(for: window) { response in
             if response == .OK, let url = panel.url { pane.open(url) }
+        }
+    }
+
+    func chooseImage(for pane: Pane) {
+        activeID = pane.id
+        let panel = NSOpenPanel()
+        panel.title = "Choose an image"
+        panel.prompt = "Open Image"
+        panel.allowedContentTypes = [.png, .jpeg, .tiff, .pdf]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = pane.folder ?? FileManager.default.homeDirectoryForCurrentUser
+        guard let window = NSApp.keyWindow else { return }
+        panel.beginSheetModal(for: window) { [weak self, weak pane] response in
+            guard response == .OK, let url = panel.url, let self, let pane,
+                  self.panes.contains(where: { $0 === pane }) else { return }
+            pane.select(url)
         }
     }
 }

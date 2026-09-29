@@ -132,6 +132,14 @@ enum Checks {
         pane.open(unique)
         wait("folder enumeration") { !pane.indexing && !pane.loading }
         precondition(pane.files == files && pane.error != nil)
+        pane.select(files[2])
+        wait("image selection") { !pane.loading }
+        precondition(pane.index == 2 && pane.current == files[2], "index=\(pane.index) current=\(pane.current?.path ?? "nil") target=\(files[2].path)")
+        pane.select(small)
+        wait("image selection from another folder") { !pane.indexing && !pane.loading }
+        precondition(pane.current == small && pane.folder == root)
+        pane.open(unique)
+        wait("reopen folder") { !pane.indexing && !pane.loading }
         pane.index = 2
         pane.refresh()
         wait("refresh") { !pane.indexing && !pane.loading }

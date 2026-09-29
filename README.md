@@ -1,14 +1,14 @@
-# Plot Viewer
+# Multi-view
 
 A small native Mac app for comparing folders of plots. SwiftUI, AppKit, ImageIO, and PDFKit; no external dependencies or network access. Requires macOS 14 or later. Built and tested on this Mac with macOS 26.6.2 and Swift 6.3.3.
 
 ## Open the app
 
-Double-click **`build/Plot Viewer.app`** in Finder. You can also copy the app to your Applications folder. The app is signed locally for personal use, not notarized for distribution.
+Double-click **`build/Multi-view.app`** in Finder. For a permanent Dock shortcut, copy it to Applications, launch it there, then right-click its Dock icon and choose **Options → Keep in Dock**. The app is signed locally for personal use, not notarized for distribution.
 
 Choose **Open Folder** and select a folder of PNG, JPEG, TIFF, or PDF plots. Add up to four panes and open a different folder in each, or drop a folder onto a pane. Only files directly inside the folder are listed, in Finder-style filename order (`plot2` before `plot10`). Hidden files and subfolders are ignored. Multipage TIFFs show their first image; PDFs have separate page controls.
 
-Click a pane to select it; its outline turns blue. Browse using the pane’s arrows or the keyboard. **Link Navigation** makes file arrows move all populated panes together, preserving their current offsets. It stops at the first/last file of the shortest remaining sequence. Empty panes are ignored, and linked movement waits until folder indexing finishes. Matching filenames is not required.
+Click a pane to select it; its outline turns blue. Browse using the pane’s arrows or the keyboard. Click the filename in a pane’s header to choose a particular image with the macOS file picker; it opens in that pane’s current folder and can also open an image from another folder. **Link Navigation** makes file arrows move all populated panes together, preserving their current offsets. It stops at the first/last file of the shortest remaining sequence. Empty panes are ignored, and linked movement waits until folder indexing finishes. Matching filenames is not required.
 
 | Action | Shortcut / gesture |
 | --- | --- |
@@ -35,14 +35,14 @@ From this folder, with Apple Command Line Tools installed:
 
 ```sh
 ./build.sh
-open 'build/Plot Viewer.app'
+open 'build/Multi-view.app'
 ./build.sh test
 ./build.sh stress
 ```
 
 The build script targets macOS 14+ for the current Mac’s architecture. It builds an optimized executable, assembles the app bundle, and applies an ad-hoc signature. No full Xcode installation is needed.
 
-The assertion-based check covers ordering/filtering, independent and linked navigation, pane limits, refresh selection, folder-drop URL delivery, empty/missing/corrupt files, obsolete asynchronous results, original raster dimensions, and multipage PDFs. The stress option creates four folders with 10,000 hard-linked image entries each, then exercises four 49-megapixel originals, repeated full-detail browsing, and rapid linked navigation. Generated fixtures and compiler outputs are kept in `.build/` and are not source files.
+The assertion-based check covers ordering/filtering, direct image selection, independent and linked navigation, pane limits, refresh selection, folder-drop URL delivery, empty/missing/corrupt files, obsolete asynchronous results, original raster dimensions, and multipage PDFs. The stress option creates four folders with 10,000 hard-linked image entries each, then exercises four 49-megapixel originals, repeated full-detail browsing, and rapid linked navigation. Generated fixtures and compiler outputs are kept in `.build/` and are not source files.
 
 The app also accepts up to four folder paths as launch arguments. For folders protected by macOS privacy controls, select them using **Open Folder** first if access is denied; a raw command-line path does not grant folder access.
 

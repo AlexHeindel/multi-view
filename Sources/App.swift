@@ -11,8 +11,8 @@ struct PaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 7) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
                     Image(systemName: "folder").foregroundStyle(selected ? Color.accentColor : .secondary)
                     Text(pane.folder?.lastPathComponent ?? "Choose a folder")
                         .font(.system(size: 12, weight: .semibold))
@@ -22,18 +22,45 @@ struct PaneView: View {
                     Button { model.chooseFolder(for: pane) } label: { Image(systemName: "folder.badge.plus") }
                         .help("Change this pane’s folder").accessibilityLabel("Change folder")
                 }
-                HStack(spacing: 8) {
-                    Text(pane.current?.lastPathComponent ?? "—")
-                        .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
-                        .textSelection(.enabled)
-                        .help(pane.current?.path ?? "No plot selected")
+                HStack(spacing: 5) {
+                    Button { model.move(-1, from: pane) } label: { Image(systemName: "chevron.left") }
+                        .font(.system(size: 18, weight: .bold)).frame(width: 30, height: 28)
+                        .disabled(!model.canMove(-1, from: pane)).help("Previous file (←)").accessibilityLabel("Previous file")
+                    Button { model.move(1, from: pane) } label: { Image(systemName: "chevron.right") }
+                        .font(.system(size: 18, weight: .bold)).frame(width: 30, height: 28)
+                        .disabled(!model.canMove(1, from: pane)).help("Next file (→)").accessibilityLabel("Next file")
+                    Button { model.chooseImage(for: pane) } label: {
+                        HStack(spacing: 3) {
+                            Text(pane.current?.lastPathComponent ?? "Choose Image…")
+                                .lineLimit(1).truncationMode(.middle)
+                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                        }
+                    }
+                        .font(.system(size: 12))
+                        .help("Choose an image from a folder")
+                        .accessibilityLabel("Choose image")
                     Spacer(minLength: 0)
                     Text(pane.files.isEmpty ? "0 / 0" : "\(pane.index + 1) / \(pane.files.count)")
                         .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
                         .fixedSize()
+                    if let pdf = pane.pdf, pdf.pageCount > 1 {
+                        Button { activate(); pane.pdfPage -= 1 } label: { Image(systemName: "chevron.up") }
+                            .disabled(pane.pdfPage == 0).help("Previous PDF page").accessibilityLabel("Previous PDF page")
+                        Text("\(pane.pdfPage + 1)/\(pdf.pageCount)")
+                            .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                        Button { activate(); pane.pdfPage += 1 } label: { Image(systemName: "chevron.down") }
+                            .disabled(pane.pdfPage + 1 >= pdf.pageCount).help("Next PDF page").accessibilityLabel("Next PDF page")
+                    }
+                    Button("Fit") { activate(); pane.view(.fit) }.help("Fit to pane (⌘0)")
+                        .disabled(pane.raster == nil && pane.pdf == nil)
+                    Button(pane.pdf == nil ? "1:1" : "100%") { activate(); pane.view(.actualSize) }
+                        .help(pane.pdf == nil ? "One image pixel per screen pixel (⌘1)" : "PDF at 100% (⌘1)")
+                        .accessibilityLabel("Actual Size").disabled(pane.raster == nil && pane.pdf == nil)
                 }
+                .buttonStyle(.borderless).controlSize(.small)
+                .labelStyle(.iconOnly)
             }
-            .padding(12)
+            .padding(.horizontal, 8).padding(.vertical, 5)
             .background(.bar)
             Divider()
             ZStack {
@@ -68,8 +95,6 @@ struct PaneView: View {
             if let error = pane.detailError {
                 Text(error).font(.caption).foregroundStyle(.orange).padding(6)
             }
-            Divider()
-            controls
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 9))
@@ -97,34 +122,6 @@ struct PaneView: View {
         }.padding(24)
     }
 
-    private var controls: some View {
-        VStack(spacing: 6) {
-            if let pdf = pane.pdf, pdf.pageCount > 1 {
-                HStack(spacing: 10) {
-                    Button { activate(); pane.pdfPage -= 1 } label: { Image(systemName: "chevron.up") }
-                        .disabled(pane.pdfPage == 0).help("Previous PDF page").accessibilityLabel("Previous PDF page")
-                    Text("Page \(pane.pdfPage + 1) / \(pdf.pageCount)")
-                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
-                    Button { activate(); pane.pdfPage += 1 } label: { Image(systemName: "chevron.down") }
-                        .disabled(pane.pdfPage + 1 >= pdf.pageCount).help("Next PDF page").accessibilityLabel("Next PDF page")
-                }
-            }
-            HStack(spacing: 8) {
-                Button { model.move(-1, from: pane) } label: { Image(systemName: "chevron.left") }
-                    .disabled(!model.canMove(-1, from: pane)).help("Previous file (←)").accessibilityLabel("Previous file")
-                Button { model.move(1, from: pane) } label: { Image(systemName: "chevron.right") }
-                    .disabled(!model.canMove(1, from: pane)).help("Next file (→)").accessibilityLabel("Next file")
-                Spacer(minLength: 0)
-                Button("Fit") { activate(); pane.view(.fit) }.help("Fit to pane (⌘0)")
-                    .disabled(pane.raster == nil && pane.pdf == nil)
-                Button(pane.pdf == nil ? "1:1" : "100%") { activate(); pane.view(.actualSize) }
-                    .help(pane.pdf == nil ? "One image pixel per screen pixel (⌘1)" : "PDF at 100% (⌘1)")
-                    .accessibilityLabel("Actual Size").disabled(pane.raster == nil && pane.pdf == nil)
-            }
-        }
-        .buttonStyle(.borderless).controlSize(.small)
-        .padding(.horizontal, 12).padding(.vertical, 9).background(.bar)
-    }
 }
 
 struct ContentView: View {
@@ -133,17 +130,17 @@ struct ContentView: View {
     var body: some View {
         Group {
             if model.panes.count == 4 {
-                VStack(spacing: 10) {
-                    HStack(spacing: 10) { pane(0); pane(1) }
-                    HStack(spacing: 10) { pane(2); pane(3) }
+                VStack(spacing: 4) {
+                    HStack(spacing: 4) { pane(0); pane(1) }
+                    HStack(spacing: 4) { pane(2); pane(3) }
                 }
             } else {
-                HStack(spacing: 10) {
+                HStack(spacing: 4) {
                     ForEach(model.panes) { PaneView(pane: $0, model: model) }
                 }
             }
         }
-        .padding(10)
+        .padding(4)
         .frame(minWidth: CGFloat(model.panes.count == 3 ? 900 : model.panes.count > 1 ? 680 : 420), minHeight: 440)
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
@@ -177,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let model = self?.model, let window = NSApp.keyWindow,
-                  window.identifier?.rawValue == "viewer" || window.title == "Plot Viewer",
+                  window.identifier?.rawValue == "viewer" || window.title == "Multi-view",
                   window.attachedSheet == nil else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard modifiers.intersection([.command, .control, .option]).isEmpty else { return event }
@@ -200,12 +197,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 #if !CHECKS
 @main
-struct PlotViewerApp: App {
+struct MultiViewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model = WindowModel()
 
     var body: some Scene {
-        Window("Plot Viewer", id: "viewer") {
+        Window("Multi-view", id: "viewer") {
             ContentView(model: model).onAppear {
                 delegate.model = model
                 // Folder arguments make Terminal launching and reproducible checks straightforward.
