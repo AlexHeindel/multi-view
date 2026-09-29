@@ -1,0 +1,263 @@
+import AppKit
+import ImageIO
+import PDFKit
+import CoreText
+
+@main
+enum Checks {
+    static let fm = FileManager.default
+
+    static func wait(_ message: String, timeout: TimeInterval = 30, until condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition(), Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        precondition(condition(), "Timed out: \(message)")
+    }
+
+    static func label(_ text: String, in context: CGContext, at point: CGPoint, size: CGFloat) {
+        context.textMatrix = .identity
+        context.textPosition = point
+        let font = CTFontCreateWithName("Helvetica" as CFString, size, nil)
+        let string = NSAttributedString(string: text, attributes: [
+            NSAttributedString.Key(kCTFontAttributeName as String): font,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): NSColor.black.cgColor
+        ])
+        CTLineDraw(CTLineCreateWithAttributedString(string), context)
+    }
+
+    static func chart(in context: CGContext, width: Int, height: Int, series: Int) {
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let unit = CGFloat(width) / 1200
+        context.saveGState()
+        context.scaleBy(x: unit, y: CGFloat(height) / 800)
+        label("Run \(series + 1)  /  Signal comparison", in: context, at: CGPoint(x: 90, y: 725), size: 26)
+        label("Time (s)", in: context, at: CGPoint(x: 540, y: 28), size: 17)
+        label("Amplitude", in: context, at: CGPoint(x: 90, y: 680), size: 16)
+        for tick in 0...10 {
+            let x = CGFloat(100 + tick * 100)
+            context.setStrokeColor(CGColor(gray: 0.87, alpha: 1))
+            context.setLineWidth(1)
+            context.move(to: CGPoint(x: x, y: 85)); context.addLine(to: CGPoint(x: x, y: 660)); context.strokePath()
+            label("\(tick)", in: context, at: CGPoint(x: x - 5, y: 58), size: 15)
+        }
+        context.setStrokeColor(CGColor(red: 0.10, green: 0.37 + CGFloat(series) * 0.09, blue: 0.76, alpha: 1))
+        context.setLineWidth(2.5)
+        for step in 0...2000 {
+            let x = 100 + CGFloat(step) / 2
+            let t = Double(step) / 200
+            let y = 370 + 180 * sin(t * 2 + Double(series) * 0.35) * exp(-t / 13)
+            if step == 0 { context.move(to: CGPoint(x: x, y: y)) }
+            else { context.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        context.strokePath()
+        label("Full-resolution detail: 0123456789", in: context, at: CGPoint(x: 750, y: 695), size: 8)
+        context.restoreGState()
+        // Alternating one-pixel stripes expose accidental preview-only rendering at 1:1.
+        for x in 0..<200 {
+            context.setFillColor(CGColor(gray: x.isMultiple(of: 2) ? 0 : 1, alpha: 1))
+            context.fill(CGRect(x: width / 2 + x, y: height / 2, width: 1, height: 100))
+        }
+    }
+
+    static func image(at url: URL, width: Int, height: Int, type: String = "public.png", series: Int = 0) throws {
+        try autoreleasepool {
+            let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            chart(in: context, width: width, height: height, series: series)
+            let image = context.makeImage()!
+            let destination = CGImageDestinationCreateWithURL(url as CFURL, type as CFString, 1, nil)!
+            CGImageDestinationAddImage(destination, image, nil)
+            guard CGImageDestinationFinalize(destination) else { throw ViewerError.unreadable }
+        }
+    }
+
+    static func pdf(at url: URL) {
+        var box = CGRect(x: 0, y: 0, width: 1200, height: 800)
+        let context = CGContext(url as CFURL, mediaBox: &box, nil)!
+        for series in 0..<3 {
+            context.beginPDFPage(nil)
+            chart(in: context, width: 1200, height: 800, series: series)
+            context.endPDFPage()
+        }
+        context.closePDF()
+    }
+
+    static func main() throws {
+        _ = NSApplication.shared
+        let root = URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent(".build/fixtures")
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let unique = root.appendingPathComponent("check-" + UUID().uuidString)
+        try fm.createDirectory(at: unique, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: unique) }
+        let small = root.appendingPathComponent("sample.png")
+        let large = root.appendingPathComponent("detail.tiff")
+        let report = root.appendingPathComponent("report.pdf")
+        try image(at: small, width: 1200, height: 800)
+        try image(at: large, width: 2400, height: 1600, type: "public.tiff")
+        pdf(at: report)
+        for name in ["plot10.PNG", "plot2.png", "plot1.jpg", ".hidden.png", "notes.txt", "broken.tif"] {
+            try Data("not an image".utf8).write(to: unique.appendingPathComponent(name))
+        }
+        try fm.createDirectory(at: unique.appendingPathComponent("nested.png"), withIntermediateDirectories: true)
+        let files = try Catalog.files(in: unique)
+        precondition(files.map(\.lastPathComponent) == ["broken.tif", "plot1.jpg", "plot2.png", "plot10.PNG"])
+        precondition(Catalog.selection(in: files, preserving: files[2], oldIndex: 0) == 2)
+        precondition(Catalog.selection(in: Array(files.prefix(2)), preserving: files[3], oldIndex: 3) == 1)
+        precondition(Catalog.selection(in: [], preserving: nil, oldIndex: 10) == 0)
+        precondition(!Catalog.canMove([], by: 1))
+        precondition(!Catalog.canMove([(0, 0)], by: 1))
+        precondition(!Catalog.canMove([(0, 3)], by: -1))
+        precondition(Catalog.canMove([(0, 3), (1, 3)], by: 1))
+        precondition(!Catalog.canMove([(1, 3), (1, 2)], by: 1))
+        precondition(!Catalog.canMove([(0, 3), (1, 2)], by: -1))
+        let preview = try Loader.shared.raster(at: large, full: false)
+        precondition(preview.image.width == 1600 && !preview.fullDetail)
+        let full = try Loader.shared.raster(at: large, full: true)
+        precondition(full.image.width == 2400 && full.image.height == 1600 && full.fullDetail)
+        let scroll = ImageScrollView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        var detailRequests = 0
+        scroll.requestDetail = { detailRequests += 1 }
+        scroll.display(Raster(image: preview.image, size: CGSize(width: 1640, height: 1093), fullDetail: false))
+        scroll.actualSize()
+        wait("original detail even just beyond preview resolution") { detailRequests > 0 }
+        precondition(abs(scroll.magnification - 0.5) < 0.001)
+        scroll.fit()
+        precondition(scroll.fitting && scroll.magnification < 0.5)
+        precondition(PDFDocument(url: report)?.pageCount == 3)
+
+        let pane = Pane()
+        pane.open(unique)
+        wait("folder enumeration") { !pane.indexing && !pane.loading }
+        precondition(pane.files == files && pane.error != nil)
+        pane.index = 2
+        pane.refresh()
+        wait("refresh") { !pane.indexing && !pane.loading }
+        precondition(pane.current?.lastPathComponent == "plot2.png")
+        try fm.removeItem(at: unique.appendingPathComponent("plot2.png"))
+        pane.refresh()
+        wait("refresh after removal") { !pane.indexing && !pane.loading }
+        precondition(pane.current?.lastPathComponent == "plot10.PNG")
+        pane.open(unique.appendingPathComponent("gone"))
+        wait("removed folder") { !pane.indexing }
+        precondition(pane.error != nil && pane.files.isEmpty)
+        let empty = unique.appendingPathComponent("empty")
+        try fm.createDirectory(at: empty, withIntermediateDirectories: true)
+        pane.open(unique)
+        pane.open(empty)
+        wait("stale folder result") { !pane.indexing }
+        precondition(pane.folder == empty && pane.files.isEmpty && pane.error == nil)
+        pane.files = [large, unique.appendingPathComponent("broken.tif")]
+        pane.index = 0
+        pane.load()
+        pane.index = 1
+        pane.load()
+        wait("stale image result") { !pane.loading }
+        precondition(pane.raster == nil && pane.error != nil)
+        pane.index = 0
+        pane.load()
+        wait("preview") { pane.raster != nil }
+        pane.requestFullDetail()
+        pane.index = 1
+        pane.load()
+        wait("stale full-detail result") { !pane.loading }
+        precondition(pane.raster == nil && pane.error != nil && !pane.loadingDetail)
+        pane.files = [report]
+        pane.index = 0
+        pane.load()
+        wait("PDF") { !pane.loading }
+        precondition(pane.pdf?.pageCount == 3)
+        pane.close()
+
+        let model = WindowModel()
+        model.addPane()
+        let left = model.panes[0], right = model.panes[1]
+        left.files = [small, large, report]; right.files = [small, report]
+        model.linked = true
+        model.move(1, from: left)
+        precondition(left.index == 1 && right.index == 1)
+        model.move(1, from: left)
+        precondition(left.index == 1 && right.index == 1)
+        model.linked = false
+        model.move(1, from: left)
+        precondition(left.index == 2 && right.index == 1)
+        model.linked = true
+        model.move(-1, from: left)
+        precondition(left.index == 1 && right.index == 0)
+        model.addPane(); model.addPane(); model.addPane()
+        precondition(model.panes.count == 4)
+        model.cyclePane()
+        precondition(model.activeID == left.id)
+        model.cyclePane(backward: true)
+        precondition(model.activeID == model.panes[3].id)
+        model.removePane(); model.removePane(); model.removePane(); model.removePane()
+        precondition(model.panes.count == 1)
+        precondition(!model.acceptDrop([], into: model.active))
+        precondition(!model.acceptDrop([NSItemProvider(object: "not a folder" as NSString)], into: model.active))
+        precondition(model.acceptDrop([NSItemProvider(object: empty as NSURL)], into: model.active))
+        wait("folder drop") { model.active.folder == empty && !model.active.indexing }
+        precondition(model.active.files.isEmpty && model.active.error == nil)
+        model.panes.forEach { $0.close() }
+        print("PASS: sorting, filtering, boundaries, linked navigation, refresh, folder drops, empty/missing/corrupt files, stale results, full-resolution zoom, and multipage PDF.")
+        if CommandLine.arguments.contains("stress") { try stress(root: root) }
+    }
+
+    static func residentMB() -> Double {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        return result == KERN_SUCCESS ? Double(info.resident_size) / 1_048_576 : 0
+    }
+
+    static func stress(root: URL) throws {
+        print("Preparing four folders of 10,000 files, each a 7000 × 7000 (49 MP) raster…")
+        var folders: [URL] = []
+        for series in 0..<4 {
+            let folder = root.appendingPathComponent("Run-\(series + 1)")
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let original = folder.appendingPathComponent("plot1.png")
+            if !fm.fileExists(atPath: original.path) { try image(at: original, width: 7000, height: 7000, series: series) }
+            for index in 2...10000 {
+                let target = folder.appendingPathComponent("plot\(index).png")
+                if !fm.fileExists(atPath: target.path) { try fm.linkItem(at: original, to: target) }
+            }
+            folders.append(folder)
+        }
+        let model = WindowModel()
+        for _ in 0..<3 { model.addPane() }
+        let start = Date()
+        for (pane, folder) in zip(model.panes, folders) { pane.open(folder) }
+        wait("40,000-file indexing", timeout: 120) { model.panes.allSatisfy { !$0.indexing && !$0.loading } }
+        precondition(model.panes.allSatisfy { $0.files.count == 10000 && $0.raster != nil })
+        print(String(format: "Four indexed folders + previews: %.2f s", Date().timeIntervalSince(start)))
+        model.linked = true
+        var memory: [Double] = []
+        for round in 0..<8 {
+            autoreleasepool {
+                if round > 0 { model.move(1, from: model.panes[0]) }
+                wait("previews") { model.panes.allSatisfy { !$0.loading } }
+                model.panes.forEach { $0.requestFullDetail() }
+                wait("49 MP original detail", timeout: 120) { model.panes.allSatisfy { !$0.loadingDetail } }
+                precondition(model.panes.allSatisfy { $0.raster?.image.width == 7000 && $0.raster?.fullDetail == true })
+            }
+            memory.append(residentMB())
+            print(String(format: "Full-detail round %d: %.0f MB resident", round + 1, memory.last!))
+        }
+        precondition((memory.suffix(3).max() ?? 0) < (memory.dropFirst().prefix(3).max() ?? 0) + 512,
+                     "Memory growth exceeded 512 MB after warmup")
+        for _ in 0..<50 { model.move(1, from: model.panes[0]) }
+        wait("rapid navigation", timeout: 120) { model.panes.allSatisfy { !$0.loading } }
+        precondition(model.panes.allSatisfy { $0.index == 57 && $0.raster != nil })
+        model.panes.forEach { $0.close() }
+        Loader.shared.decoding.waitUntilAllOperationsAreFinished()
+        Loader.shared.previews.removeAllObjects()
+        print("PASS: 40,000 files, four simultaneous 49 MP originals, eight browsing rounds, and 50 rapid linked steps.")
+        print("Reusable UI fixtures: \(root.path)")
+    }
+}
