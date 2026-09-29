@@ -101,6 +101,7 @@ struct PaneView: View {
         .overlay(RoundedRectangle(cornerRadius: 9)
             .strokeBorder(dropTarget ? Color.accentColor : selected ? Color.accentColor.opacity(0.65) : Color.primary.opacity(0.12),
                           lineWidth: dropTarget ? 2 : 1))
+        .background(WideDividerAnchor().allowsHitTesting(false))
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { activate() })
         .onDrop(of: [UTType.fileURL], isTargeted: $dropTarget) { providers in
@@ -124,22 +125,46 @@ struct PaneView: View {
 
 }
 
+private struct WideDividerAnchor: NSViewRepresentable {
+    final class View: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                var ancestor = self?.superview
+                while let view = ancestor {
+                    if let split = view as? NSSplitView, split.dividerStyle != .thick {
+                        split.dividerStyle = .thick
+                    }
+                    ancestor = view.superview
+                }
+            }
+        }
+    }
+
+    func makeNSView(context: Context) -> View { View() }
+    func updateNSView(_ view: View, context: Context) {}
+}
+
 struct ContentView: View {
     @ObservedObject var model: WindowModel
+    @State private var splitVersion = 0
 
     var body: some View {
         Group {
             if model.panes.count == 4 {
-                VStack(spacing: 4) {
-                    HStack(spacing: 4) { pane(0); pane(1) }
-                    HStack(spacing: 4) { pane(2); pane(3) }
+                VSplitView {
+                    HSplitView { pane(0); pane(1) }
+                    HSplitView { pane(2); pane(3) }
                 }
-            } else {
-                HStack(spacing: 4) {
+            } else if model.panes.count > 1 {
+                HSplitView {
                     ForEach(model.panes) { PaneView(pane: $0, model: model) }
                 }
+            } else {
+                pane(0)
             }
         }
+        .id("\(model.panes.count)-\(splitVersion)")
         .padding(4)
         .frame(minWidth: CGFloat(model.panes.count == 3 ? 900 : model.panes.count > 1 ? 680 : 420), minHeight: 440)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -151,6 +176,8 @@ struct ContentView: View {
                     .disabled(model.panes.count == 4).help("Add a pane (⌘T)")
                 Button { model.removePane() } label: { Label("Remove Pane", systemImage: "minus.square") }
                     .disabled(model.panes.count == 1).help("Remove the selected pane")
+                Button { splitVersion += 1 } label: { Label("Equalize Panes", systemImage: "square.split.2x2") }
+                    .disabled(model.panes.count == 1).help("Return panes to equal sizes")
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Toggle(isOn: $model.linked) { Label("Link Navigation", systemImage: "link") }

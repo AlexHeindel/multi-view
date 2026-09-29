@@ -10,6 +10,8 @@ Choose **Open Folder** and select a folder of PNG, JPEG, TIFF, or PDF plots. Add
 
 Click a pane to select it; its outline turns blue. Browse using the pane’s arrows or the keyboard. Click the filename in a pane’s header to choose a particular image with the macOS file picker; it opens in that pane’s current folder and can also open an image from another folder. **Link Navigation** makes file arrows move all populated panes together, preserving their current offsets. It stops at the first/last file of the shortest remaining sequence. Empty panes are ignored, and linked movement waits until folder indexing finishes. Matching filenames is not required.
 
+Drag a divider to resize the panes. With four panes, each row’s vertical divider and the divider between rows can be dragged. Use **Equalize Panes** in the toolbar to restore even sizes.
+
 | Action | Shortcut / gesture |
 | --- | --- |
 | Previous / next file | Left / Right |
