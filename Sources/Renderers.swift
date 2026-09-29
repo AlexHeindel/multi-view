@@ -17,16 +17,41 @@ final class CenteredClipView: NSClipView {
     }
 }
 
+final class PassiveImageView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 final class ImageCanvas: NSView {
     var image: CGImage? { didSet { needsDisplay = true } }
+    var vectorImage: NSImage? { didSet { needsDisplay = true } }
+    let animation = PassiveImageView()
     var activate: (() -> Void)?
 
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        animation.animates = true
+        animation.imageScaling = .scaleAxesIndependently
+        animation.isHidden = true
+        addSubview(animation)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        animation.frame = bounds
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        guard let image, let context = NSGraphicsContext.current?.cgContext else { return }
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.setFillColor(NSColor.white.cgColor)
         context.fill(bounds)
-        context.interpolationQuality = .high
-        context.draw(image, in: bounds)
+        if let image {
+            context.interpolationQuality = .high
+            context.draw(image, in: bounds)
+        } else {
+            vectorImage?.draw(in: bounds)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -52,6 +77,8 @@ final class ImageCanvas: NSView {
 final class ImageScrollView: NSScrollView {
     let canvas = ImageCanvas(frame: .zero)
     var raster: Raster?
+    var nativeImage: NSImage?
+    var imageSize: CGSize { raster?.size ?? nativeImage?.size ?? .zero }
     var requestDetail: (() -> Void)?
     var lastCommand = -1
     var fitting = true
@@ -75,20 +102,37 @@ final class ImageScrollView: NSScrollView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func display(_ raster: Raster) {
-        let first = self.raster == nil
+        let first = self.raster == nil && nativeImage == nil
         self.raster = raster
+        nativeImage = nil
         canvas.frame = CGRect(origin: .zero, size: raster.size)
+        canvas.vectorImage = nil
+        canvas.animation.image = nil
+        canvas.animation.isHidden = true
         canvas.image = raster.image
         if first { fit() }
         checkDetail()
     }
 
+    func display(_ image: NSImage, animated: Bool) {
+        let first = raster == nil && nativeImage == nil
+        raster = nil
+        nativeImage = image
+        canvas.frame = CGRect(origin: .zero, size: image.size)
+        canvas.image = nil
+        canvas.vectorImage = animated ? nil : image
+        canvas.animation.image = animated ? image : nil
+        canvas.animation.isHidden = !animated
+        if first { fit() }
+    }
+
     func fit() {
         fitting = true
-        guard let raster, contentSize.width > 1, contentSize.height > 1 else { return }
-        let scale = min(contentSize.width / raster.size.width, contentSize.height / raster.size.height)
+        let size = imageSize
+        guard size.width > 0, size.height > 0, contentSize.width > 1, contentSize.height > 1 else { return }
+        let scale = min(contentSize.width / size.width, contentSize.height / size.height)
         setMagnification(max(minMagnification, min(maxMagnification, scale)),
-                         centeredAt: NSPoint(x: raster.size.width / 2, y: raster.size.height / 2))
+                         centeredAt: NSPoint(x: size.width / 2, y: size.height / 2))
         checkDetail()
     }
 
@@ -130,6 +174,15 @@ final class ImageScrollView: NSScrollView {
             DispatchQueue.main.async { request?() }
         }
     }
+
+    func applyCommand(_ pane: Pane) {
+        guard lastCommand != pane.commandNumber else { return }
+        lastCommand = pane.commandNumber
+        switch pane.command {
+        case .fit: fit()
+        case .actualSize: actualSize()
+        }
+    }
 }
 
 struct RasterView: NSViewRepresentable {
@@ -143,13 +196,24 @@ struct RasterView: NSViewRepresentable {
         view.canvas.activate = activate
         view.requestDetail = { [weak pane] in pane?.requestFullDetail() }
         if view.raster !== raster { view.display(raster) }
-        if view.lastCommand != pane.commandNumber {
-            view.lastCommand = pane.commandNumber
-            switch pane.command {
-            case .fit: view.fit()
-            case .actualSize: view.actualSize()
-            }
+        view.applyCommand(pane)
+    }
+}
+
+struct NativeImageView: NSViewRepresentable {
+    @ObservedObject var pane: Pane
+    let image: NSImage
+    let activate: () -> Void
+
+    func makeNSView(context: Context) -> ImageScrollView { ImageScrollView() }
+
+    func updateNSView(_ view: ImageScrollView, context: Context) {
+        view.canvas.activate = activate
+        view.requestDetail = nil
+        if view.nativeImage !== image {
+            view.display(image, animated: pane.current?.pathExtension.lowercased() == "gif")
         }
+        view.applyCommand(pane)
     }
 }
 

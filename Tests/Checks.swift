@@ -84,6 +84,24 @@ enum Checks {
         context.closePDF()
     }
 
+    static func gif(at url: URL) throws {
+        let destination = CGImageDestinationCreateWithURL(url as CFURL, "com.compuserve.gif" as CFString, 2, nil)!
+        CGImageDestinationSetProperties(destination, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
+        ] as CFDictionary)
+        for gray: CGFloat in [0, 1] {
+            let context = CGContext(data: nil, width: 20, height: 20, bitsPerComponent: 8, bytesPerRow: 0,
+                                    space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.setFillColor(CGColor(gray: gray, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 20, height: 20))
+            CGImageDestinationAddImage(destination, context.makeImage()!, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.5]
+            ] as CFDictionary)
+        }
+        guard CGImageDestinationFinalize(destination) else { throw ViewerError.unreadable }
+    }
+
     static func main() throws {
         _ = NSApplication.shared
         let root = URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent(".build/fixtures")
@@ -92,11 +110,26 @@ enum Checks {
         try fm.createDirectory(at: unique, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: unique) }
         let small = root.appendingPathComponent("sample.png")
+        let jpeg = root.appendingPathComponent("sample.jpg")
         let large = root.appendingPathComponent("detail.tiff")
+        let animation = root.appendingPathComponent("sample.gif")
+        let vector = root.appendingPathComponent("sample.svg")
         let report = root.appendingPathComponent("report.pdf")
         try image(at: small, width: 1200, height: 800)
+        try image(at: jpeg, width: 1200, height: 800, type: "public.jpeg")
         try image(at: large, width: 2400, height: 1600, type: "public.tiff")
+        try gif(at: animation)
+        try Data("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='60'><rect width='80' height='60' fill='red'/></svg>".utf8).write(to: vector)
         pdf(at: report)
+        precondition(CGImageSourceGetCount(CGImageSourceCreateWithURL(animation as CFURL, nil)!) == 2)
+        let svgImage = NSImage(contentsOf: vector)!
+        precondition(svgImage.size == CGSize(width: 80, height: 60))
+        let nativeScroll = ImageScrollView()
+        nativeScroll.frame = NSRect(x: 0, y: 0, width: 300, height: 200)
+        nativeScroll.display(svgImage, animated: false)
+        precondition(nativeScroll.canvas.vectorImage != nil)
+        nativeScroll.display(NSImage(contentsOf: animation)!, animated: true)
+        precondition(nativeScroll.canvas.animation.animates && !nativeScroll.canvas.animation.isHidden)
         for name in ["plot10.PNG", "plot2.png", "plot1.jpg", ".hidden.png", "notes.txt", "broken.tif"] {
             try Data("not an image".utf8).write(to: unique.appendingPathComponent(name))
         }
@@ -223,19 +256,23 @@ enum Checks {
         wait("tab image reload") { !retainedPane.loading && retainedPane.raster != nil }
         tabs.addTab()
         precondition(tabs.tabs.last?.id == tabs.activeID && tabs.tabs[1].id == secondTab)
-        for _ in 0..<4 { tabs.addTab() }
-        precondition(tabs.tabs.count == 4 && tabs.active.model.panes.count == 1)
+        for _ in 0..<8 { tabs.addTab() }
+        precondition(tabs.tabs.count == 8 && tabs.active.model.panes.count == 1)
         precondition(!tabs.active.model.linked && tabs.tabs[0].model.panes.count == 2)
         tabs.closeTab(firstTab)
-        precondition(tabs.tabs.count == 3 && tabs.active.model.panes.count == 1)
+        precondition(tabs.tabs.count == 7 && tabs.active.model.panes.count == 1)
         tabs.addTab()
-        precondition(tabs.tabs.count == 4 && Set(tabs.tabs.map(\.number)).count == 4)
+        precondition(tabs.tabs.count == 8 && Set(tabs.tabs.map(\.number)).count == 8)
         tabs.closeTab(tabs.activeID)
-        precondition(tabs.tabs.count == 3 && tabs.tabs.contains { $0.id == tabs.activeID })
+        precondition(tabs.tabs.count == 7 && tabs.tabs.contains { $0.id == tabs.activeID })
         tabs.close()
         let paired = unique.appendingPathComponent("paired")
         try fm.createDirectory(at: paired, withIntermediateDirectories: true)
         try fm.copyItem(at: small, to: paired.appendingPathComponent("same.png"))
+        try fm.copyItem(at: jpeg, to: paired.appendingPathComponent("same.jpg"))
+        try fm.copyItem(at: large, to: paired.appendingPathComponent("same.tiff"))
+        try fm.copyItem(at: animation, to: paired.appendingPathComponent("same.gif"))
+        try fm.copyItem(at: vector, to: paired.appendingPathComponent("same.svg"))
         try fm.copyItem(at: report, to: paired.appendingPathComponent("same.pdf"))
         let filtered = WindowModel()
         filtered.active.open(paired)
@@ -243,6 +280,20 @@ enum Checks {
         filtered.fileFilter = .png
         wait("PNG filter") { !filtered.active.loading }
         precondition(filtered.active.files.map(\.lastPathComponent) == ["same.png"])
+        filtered.fileFilter = .jpeg
+        wait("JPEG filter") { !filtered.active.loading }
+        precondition(filtered.active.current?.lastPathComponent == "same.jpg" && filtered.active.raster != nil)
+        precondition(FileFilter.jpeg.includes(URL(fileURLWithPath: "same.JPEG")))
+        filtered.fileFilter = .tiff
+        wait("TIFF filter") { !filtered.active.loading }
+        precondition(filtered.active.current?.lastPathComponent == "same.tiff" && filtered.active.raster != nil)
+        precondition(FileFilter.tiff.includes(URL(fileURLWithPath: "same.TIF")))
+        filtered.fileFilter = .gif
+        wait("GIF filter") { !filtered.active.loading }
+        precondition(filtered.active.current?.lastPathComponent == "same.gif" && filtered.active.nativeImage != nil)
+        filtered.fileFilter = .svg
+        wait("SVG filter") { !filtered.active.loading }
+        precondition(filtered.active.current?.lastPathComponent == "same.svg" && filtered.active.nativeImage != nil)
         filtered.fileFilter = .pdf
         wait("PDF filter") { !filtered.active.loading }
         precondition(filtered.active.current?.lastPathComponent == "same.pdf")
@@ -252,9 +303,9 @@ enum Checks {
         precondition(filtered.active.files.map(\.lastPathComponent) == ["same.pdf"])
         filtered.fileFilter = .all
         wait("all files filter") { filtered.panes.allSatisfy { !$0.loading } }
-        precondition(filtered.panes.allSatisfy { $0.files.count == 2 })
+        precondition(filtered.panes.allSatisfy { $0.files.count == 6 })
         filtered.panes.forEach { $0.close() }
-        print("PASS: tabs, sorting, filtering, boundaries, linked navigation, refresh, folder drops, empty/missing/corrupt files, stale results, full-resolution zoom, and multipage PDF.")
+        print("PASS: eight tabs, PNG/JPEG/TIFF/GIF/SVG/PDF filtering and loading, navigation, refresh, drops, stale results, zoom, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
     }
 

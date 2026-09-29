@@ -5,23 +5,39 @@ import PDFKit
 import UniformTypeIdentifiers
 
 enum FileFilter: String, CaseIterable {
-    case png = "PNG", pdf = "PDF", all = "All"
+    case png = "PNG", jpeg = "JPEG", tiff = "TIFF", gif = "GIF", svg = "SVG", pdf = "PDF", all = "All"
+
+    var extensions: [String] {
+        switch self {
+        case .png: return ["png"]
+        case .jpeg: return ["jpg", "jpeg"]
+        case .tiff: return ["tif", "tiff"]
+        case .gif: return ["gif"]
+        case .svg: return ["svg"]
+        case .pdf: return ["pdf"]
+        case .all: return ["png", "jpg", "jpeg", "tif", "tiff", "gif", "svg", "pdf"]
+        }
+    }
 
     func includes(_ url: URL) -> Bool {
-        self == .all || url.pathExtension.lowercased() == rawValue.lowercased()
+        extensions.contains(url.pathExtension.lowercased())
     }
 
     var allowedTypes: [UTType] {
         switch self {
         case .png: return [.png]
+        case .jpeg: return [.jpeg]
+        case .tiff: return [.tiff]
+        case .gif: return [.gif]
+        case .svg: return [.svg]
         case .pdf: return [.pdf]
-        case .all: return [.png, .jpeg, .tiff, .pdf]
+        case .all: return [.png, .jpeg, .tiff, .gif, .svg, .pdf]
         }
     }
 }
 
 enum Catalog {
-    static let extensions: Set<String> = ["png", "jpg", "jpeg", "tif", "tiff", "pdf"]
+    static let extensions = Set(FileFilter.all.extensions)
 
     static func files(in folder: URL, cancelled: () -> Bool = { false }) throws -> [URL] {
         let urls = try FileManager.default.contentsOfDirectory(
@@ -135,6 +151,7 @@ final class Pane: ObservableObject, Identifiable {
     @Published var error: String?
     @Published var detailError: String?
     @Published var raster: Raster?
+    @Published var nativeImage: NSImage?
     @Published var pdf: PDFDocument?
     @Published var pdfPage = 0
     @Published var command: ViewCommand = .fit
@@ -226,6 +243,7 @@ final class Pane: ObservableObject, Identifiable {
         loads.removeAll()
         loadNumber += 1
         raster = nil
+        nativeImage = nil
         pdf = nil
         pdfPage = 0
         loading = false
@@ -257,14 +275,19 @@ final class Pane: ObservableObject, Identifiable {
         job.addExecutionBlock { [weak self, weak job] in
             guard let job, !job.isCancelled else { return }
             autoreleasepool {
-                let result: Result<(Raster?, PDFDocument?), Error> = Result {
+                let result: Result<(Raster?, PDFDocument?, NSImage?), Error> = Result {
                     if url.pathExtension.lowercased() == "pdf" {
                         guard let document = PDFDocument(url: url) else { throw ViewerError.unreadable }
                         guard !document.isLocked else { throw ViewerError.lockedPDF }
                         guard document.pageCount > 0 else { throw ViewerError.unreadable }
-                        return (nil, document)
+                        return (nil, document, nil)
                     }
-                    return (try Loader.shared.raster(at: url, full: false), nil)
+                    if ["svg", "gif"].contains(url.pathExtension.lowercased()) {
+                        guard let image = NSImage(contentsOf: url), image.size.width > 0, image.size.height > 0
+                        else { throw ViewerError.unreadable }
+                        return (nil, nil, image)
+                    }
+                    return (try Loader.shared.raster(at: url, full: false), nil, nil)
                 }
                 guard !job.isCancelled else { return }
                 DispatchQueue.main.async { [weak self] in
@@ -274,6 +297,7 @@ final class Pane: ObservableObject, Identifiable {
                     case .success(let content):
                         self.raster = content.0
                         self.pdf = content.1
+                        self.nativeImage = content.2
                     case .failure(let error): self.error = error.localizedDescription
                     }
                     self.prefetch()
@@ -313,7 +337,7 @@ final class Pane: ObservableObject, Identifiable {
     private func prefetch() {
         for next in [index - 1, index + 1] where files.indices.contains(next) {
             let url = files[next]
-            guard url.pathExtension.lowercased() != "pdf" else { continue }
+            guard !["pdf", "svg", "gif"].contains(url.pathExtension.lowercased()) else { continue }
             let job = BlockOperation()
             job.queuePriority = .veryLow
             job.addExecutionBlock { [weak job] in
@@ -476,8 +500,8 @@ final class TabsModel: ObservableObject {
     }
 
     func addTab() {
-        guard tabs.count < 4 else { return }
-        let number = (1...4).first { candidate in !tabs.contains { $0.number == candidate } }!
+        guard tabs.count < 8 else { return }
+        let number = (1...8).first { candidate in !tabs.contains { $0.number == candidate } }!
         let tab = ViewerTab(number: number)
         tabs.append(tab)
         activeID = tab.id

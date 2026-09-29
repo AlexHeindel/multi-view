@@ -52,10 +52,11 @@ struct PaneView: View {
                             .disabled(pane.pdfPage + 1 >= pdf.pageCount).help("Next PDF page").accessibilityLabel("Next PDF page")
                     }
                     Button("Fit") { activate(); pane.view(.fit) }.help("Fit to pane (⌘0)")
-                        .disabled(pane.raster == nil && pane.pdf == nil)
+                        .disabled(pane.raster == nil && pane.nativeImage == nil && pane.pdf == nil)
                     Button(pane.pdf == nil ? "1:1" : "100%") { activate(); pane.view(.actualSize) }
                         .help(pane.pdf == nil ? "One image pixel per screen pixel (⌘1)" : "PDF at 100% (⌘1)")
-                        .accessibilityLabel("Actual Size").disabled(pane.raster == nil && pane.pdf == nil)
+                        .accessibilityLabel("Actual Size")
+                        .disabled(pane.raster == nil && pane.nativeImage == nil && pane.pdf == nil)
                 }
                 .buttonStyle(.borderless).controlSize(.small)
                 .labelStyle(.iconOnly)
@@ -73,6 +74,8 @@ struct PaneView: View {
                     status(error, symbol: "exclamationmark.triangle", progress: false)
                 } else if let raster = pane.raster {
                     RasterView(pane: pane, raster: raster, activate: activate)
+                } else if let image = pane.nativeImage {
+                    NativeImageView(pane: pane, image: image, activate: activate)
                 } else if let pdf = pane.pdf {
                     DocumentView(pane: pane, document: pdf, activate: activate)
                 } else {
@@ -83,7 +86,7 @@ struct PaneView: View {
                              model.fileFilter == .all ? "No supported plots in this folder" :
                              "No \(model.fileFilter.rawValue) files in this folder")
                             .font(.system(size: 13, weight: .medium))
-                        Text(model.fileFilter == .all ? "PNG, JPEG, TIFF & PDF" : "\(model.fileFilter.rawValue) only")
+                        Text(model.fileFilter == .all ? "PNG, JPEG, TIFF, GIF, SVG & PDF" : "\(model.fileFilter.rawValue) only")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                         Button("Open Folder…") { model.chooseFolder(for: pane) }
                     }.padding()
@@ -184,7 +187,7 @@ struct ContentView: View {
                         Text(filter.rawValue).tag(filter)
                     }
                 }
-                    .pickerStyle(.menu).help("Show PNG, PDF, or all supported files")
+                    .pickerStyle(.menu).help("Filter files by format")
                 Button { splitVersion += 1 } label: { Label("Equalize Panes", systemImage: "square.split.2x2") }
                     .disabled(model.panes.count == 1).help("Return panes to equal sizes")
             }
@@ -209,35 +212,49 @@ struct TabbedContentView: View {
             .id(tabs.activeID)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 4) {
-                        ForEach(tabs.tabs) { tab in
-                            HStack(spacing: 6) {
-                                Button("Tab \(tab.number)") { tabs.activeID = tab.id }
-                                    .accessibilityLabel("Tab \(tab.number)")
-                                    .fixedSize()
-                                if tabs.tabs.count > 1 {
-                                    Button { tabs.closeTab(tab.id) } label: {
-                                        Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                    ScrollViewReader { scroll in
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 4) {
+                                ForEach(tabs.tabs) { tab in
+                                    HStack(spacing: 6) {
+                                        Button("Tab \(tab.number)") { tabs.activeID = tab.id }
+                                            .accessibilityLabel("Tab \(tab.number)")
+                                            .fixedSize()
+                                        if tabs.tabs.count > 1 {
+                                            Button { tabs.closeTab(tab.id) } label: {
+                                                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                                            }
+                                            .accessibilityLabel("Close tab \(tab.number)")
+                                        }
                                     }
-                                    .accessibilityLabel("Close tab \(tab.number)")
+                                    .font(.system(size: 12, weight: tabs.activeID == tab.id ? .semibold : .regular))
+                                    .foregroundStyle(tabs.activeID == tab.id ? Color.primary : Color.secondary)
+                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                    .background(tabs.activeID == tab.id ? Color.accentColor.opacity(0.16) : Color.clear,
+                                                in: RoundedRectangle(cornerRadius: 7))
+                                    .fixedSize()
+                                    .id(tab.id)
                                 }
+                                Button { tabs.addTab() } label: { Image(systemName: "plus") }
+                                    .disabled(tabs.tabs.count == 8)
+                                    .help("New tab (⌘N)")
+                                    .accessibilityLabel("New tab")
+                                    .padding(.horizontal, 8)
+                                    .id("plus")
                             }
-                            .font(.system(size: 12, weight: tabs.activeID == tab.id ? .semibold : .regular))
-                            .foregroundStyle(tabs.activeID == tab.id ? Color.primary : Color.secondary)
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(tabs.activeID == tab.id ? Color.accentColor.opacity(0.16) : Color.clear,
-                                        in: RoundedRectangle(cornerRadius: 7))
                             .fixedSize()
-                        }
-                        Button { tabs.addTab() } label: { Image(systemName: "plus") }
-                            .disabled(tabs.tabs.count == 4)
-                            .help("New tab (⌘N)")
-                            .accessibilityLabel("New tab")
                             .padding(.horizontal, 8)
+                        }
+                        .scrollIndicators(.hidden)
+                        .frame(width: min(CGFloat(tabs.tabs.count) * 90 + 40, 450), height: 36)
+                        .onChange(of: tabs.activeID) { _, id in
+                            withAnimation {
+                                scroll.scrollTo(id == tabs.tabs.last?.id ? AnyHashable("plus") : AnyHashable(id),
+                                                anchor: .trailing)
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .padding(.horizontal, 8)
                 }
             }
     }
@@ -300,7 +317,7 @@ struct MultiViewApp: App {
         .defaultSize(width: 1100, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Tab") { tabs.addTab() }.keyboardShortcut("n").disabled(tabs.tabs.count == 4)
+                Button("New Tab") { tabs.addTab() }.keyboardShortcut("n").disabled(tabs.tabs.count == 8)
                 Button("Close Tab") { tabs.closeTab(tabs.activeID) }.disabled(tabs.tabs.count == 1)
                 Divider()
                 Button("Open Folder…") { tabs.active.model.chooseFolder() }.keyboardShortcut("o")
