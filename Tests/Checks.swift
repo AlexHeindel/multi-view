@@ -209,6 +209,30 @@ enum Checks {
         wait("folder drop") { model.active.folder == empty && !model.active.indexing }
         precondition(model.active.files.isEmpty && model.active.error == nil)
         model.panes.forEach { $0.close() }
+        let tabs = TabsModel()
+        let firstTab = tabs.active.id
+        tabs.active.model.addPane()
+        tabs.active.model.linked = true
+        let retainedPane = tabs.active.model.active
+        retainedPane.files = [small]
+        retainedPane.raster = preview
+        tabs.addTab()
+        precondition(retainedPane.raster == nil)
+        let secondTab = tabs.active.id
+        tabs.activeID = firstTab
+        wait("tab image reload") { !retainedPane.loading && retainedPane.raster != nil }
+        tabs.addTab()
+        precondition(tabs.tabs.last?.id == tabs.activeID && tabs.tabs[1].id == secondTab)
+        for _ in 0..<4 { tabs.addTab() }
+        precondition(tabs.tabs.count == 4 && tabs.active.model.panes.count == 1)
+        precondition(!tabs.active.model.linked && tabs.tabs[0].model.panes.count == 2)
+        tabs.closeTab(firstTab)
+        precondition(tabs.tabs.count == 3 && tabs.active.model.panes.count == 1)
+        tabs.addTab()
+        precondition(tabs.tabs.count == 4 && Set(tabs.tabs.map(\.number)).count == 4)
+        tabs.closeTab(tabs.activeID)
+        precondition(tabs.tabs.count == 3 && tabs.tabs.contains { $0.id == tabs.activeID })
+        tabs.close()
         let paired = unique.appendingPathComponent("paired")
         try fm.createDirectory(at: paired, withIntermediateDirectories: true)
         try fm.copyItem(at: small, to: paired.appendingPathComponent("same.png"))
@@ -230,7 +254,7 @@ enum Checks {
         wait("all files filter") { filtered.panes.allSatisfy { !$0.loading } }
         precondition(filtered.panes.allSatisfy { $0.files.count == 2 })
         filtered.panes.forEach { $0.close() }
-        print("PASS: sorting, filtering, boundaries, linked navigation, refresh, folder drops, empty/missing/corrupt files, stale results, full-resolution zoom, and multipage PDF.")
+        print("PASS: tabs, sorting, filtering, boundaries, linked navigation, refresh, folder drops, empty/missing/corrupt files, stale results, full-resolution zoom, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
     }
 

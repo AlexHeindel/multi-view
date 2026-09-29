@@ -201,15 +201,57 @@ struct ContentView: View {
     private func pane(_ index: Int) -> some View { PaneView(pane: model.panes[index], model: model) }
 }
 
+struct TabbedContentView: View {
+    @ObservedObject var tabs: TabsModel
+
+    var body: some View {
+        ContentView(model: tabs.active.model)
+            .id(tabs.activeID)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 4) {
+                        ForEach(tabs.tabs) { tab in
+                            HStack(spacing: 6) {
+                                Button("Tab \(tab.number)") { tabs.activeID = tab.id }
+                                    .accessibilityLabel("Tab \(tab.number)")
+                                    .fixedSize()
+                                if tabs.tabs.count > 1 {
+                                    Button { tabs.closeTab(tab.id) } label: {
+                                        Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                                    }
+                                    .accessibilityLabel("Close tab \(tab.number)")
+                                }
+                            }
+                            .font(.system(size: 12, weight: tabs.activeID == tab.id ? .semibold : .regular))
+                            .foregroundStyle(tabs.activeID == tab.id ? Color.primary : Color.secondary)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(tabs.activeID == tab.id ? Color.accentColor.opacity(0.16) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                            .fixedSize()
+                        }
+                        Button { tabs.addTab() } label: { Image(systemName: "plus") }
+                            .disabled(tabs.tabs.count == 4)
+                            .help("New tab (⌘N)")
+                            .accessibilityLabel("New tab")
+                            .padding(.horizontal, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                }
+            }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    weak var model: WindowModel?
+    weak var tabs: TabsModel?
     var keyMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let model = self?.model, let window = NSApp.keyWindow,
+            guard let model = self?.tabs?.active.model, let window = NSApp.keyWindow,
                   window.identifier?.rawValue == "viewer" || window.title == "Multi-view",
                   window.attachedSheet == nil else { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -227,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-        model?.panes.forEach { $0.close() }
+        tabs?.close()
     }
 }
 
@@ -235,16 +277,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct MultiViewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var model = WindowModel()
+    @StateObject private var tabs = TabsModel()
 
     var body: some Scene {
         Window("Multi-view", id: "viewer") {
-            ContentView(model: model).onAppear {
-                delegate.model = model
+            TabbedContentView(tabs: tabs).onAppear {
+                delegate.tabs = tabs
                 // Folder arguments make Terminal launching and reproducible checks straightforward.
                 let folders = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
                     .map { URL(fileURLWithPath: $0, isDirectory: true) }
                     .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+                let model = tabs.active.model
                 if model.active.folder == nil {
                     for (index, folder) in folders.prefix(4).enumerated() {
                         if index > 0 { model.addPane() }
@@ -257,23 +300,29 @@ struct MultiViewApp: App {
         .defaultSize(width: 1100, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Open Folder…") { model.chooseFolder() }.keyboardShortcut("o")
-                Button("Add Pane") { model.addPane() }.keyboardShortcut("t").disabled(model.panes.count == 4)
-                Button("Remove Pane") { model.removePane() }.keyboardShortcut("w", modifiers: [.command, .shift])
-                    .disabled(model.panes.count == 1)
+                Button("New Tab") { tabs.addTab() }.keyboardShortcut("n").disabled(tabs.tabs.count == 4)
+                Button("Close Tab") { tabs.closeTab(tabs.activeID) }.disabled(tabs.tabs.count == 1)
+                Divider()
+                Button("Open Folder…") { tabs.active.model.chooseFolder() }.keyboardShortcut("o")
+                Button("Add Pane") { tabs.active.model.addPane() }.keyboardShortcut("t")
+                    .disabled(tabs.active.model.panes.count == 4)
+                Button("Remove Pane") { tabs.active.model.removePane() }.keyboardShortcut("w", modifiers: [.command, .shift])
+                    .disabled(tabs.active.model.panes.count == 1)
             }
             CommandMenu("Compare") {
-                Toggle("Link Navigation", isOn: $model.linked).keyboardShortcut("l")
-                Button("Refresh Folder") { model.active.refresh() }.keyboardShortcut("r")
-                    .disabled(model.active.folder == nil)
+                Toggle("Link Navigation", isOn: Binding(
+                    get: { tabs.active.model.linked }, set: { tabs.active.model.linked = $0 }
+                )).keyboardShortcut("l")
+                Button("Refresh Folder") { tabs.active.model.active.refresh() }.keyboardShortcut("r")
+                    .disabled(tabs.active.model.active.folder == nil)
                 Divider()
-                Button("Fit to Pane") { model.active.view(.fit) }.keyboardShortcut("0")
-                Button("Actual Size") { model.active.view(.actualSize) }.keyboardShortcut("1")
+                Button("Fit to Pane") { tabs.active.model.active.view(.fit) }.keyboardShortcut("0")
+                Button("Actual Size") { tabs.active.model.active.view(.actualSize) }.keyboardShortcut("1")
                 Divider()
-                Button("Next Pane") { model.cyclePane() }
+                Button("Next Pane") { tabs.active.model.cyclePane() }
                 Button("Reveal File in Finder") {
-                    if let url = model.active.current { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                }.disabled(model.active.current == nil)
+                    if let url = tabs.active.model.active.current { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                }.disabled(tabs.active.model.active.current == nil)
             }
         }
     }

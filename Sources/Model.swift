@@ -347,6 +347,8 @@ final class WindowModel: ObservableObject {
         }
     }
 
+    func close() { panes.forEach { $0.close() } }
+
     func addPane() {
         guard panes.count < 4 else { return }
         let pane = Pane()
@@ -414,8 +416,10 @@ final class WindowModel: ObservableObject {
         panel.directoryURL = pane.folder ?? panes.compactMap(\.folder).last?.deletingLastPathComponent()
             ?? FileManager.default.homeDirectoryForCurrentUser
         guard let window = NSApp.keyWindow else { return }
-        panel.beginSheetModal(for: window) { response in
-            if response == .OK, let url = panel.url { pane.open(url) }
+        panel.beginSheetModal(for: window) { [weak self, weak pane] response in
+            guard response == .OK, let url = panel.url, let self, let pane,
+                  self.panes.contains(where: { $0 === pane }) else { return }
+            pane.open(url)
         }
     }
 
@@ -436,4 +440,57 @@ final class WindowModel: ObservableObject {
             pane.select(url)
         }
     }
+}
+
+struct ViewerTab: Identifiable {
+    let id = UUID()
+    let number: Int
+    let model = WindowModel()
+}
+
+final class TabsModel: ObservableObject {
+    @Published private(set) var tabs: [ViewerTab]
+    @Published var activeID: UUID {
+        didSet {
+            guard activeID != oldValue else { return }
+            tabs.first(where: { $0.id == oldValue })?.model.panes.forEach { $0.cancelLoads() }
+            tabs.first(where: { $0.id == activeID })?.model.panes.forEach {
+                if $0.current != nil { $0.load() }
+            }
+        }
+    }
+    private var subscriptions: [AnyCancellable] = []
+    var active: ViewerTab { tabs.first(where: { $0.id == activeID }) ?? tabs[0] }
+
+    init() {
+        let first = ViewerTab(number: 1)
+        tabs = [first]
+        activeID = first.id
+        observeTabs()
+    }
+
+    private func observeTabs() {
+        subscriptions = tabs.map { tab in
+            tab.model.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        }
+    }
+
+    func addTab() {
+        guard tabs.count < 4 else { return }
+        let number = (1...4).first { candidate in !tabs.contains { $0.number == candidate } }!
+        let tab = ViewerTab(number: number)
+        tabs.append(tab)
+        activeID = tab.id
+        observeTabs()
+    }
+
+    func closeTab(_ id: UUID) {
+        guard tabs.count > 1, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        tabs[index].model.close()
+        tabs.remove(at: index)
+        if activeID == id { activeID = tabs[min(index, tabs.count - 1)].id }
+        observeTabs()
+    }
+
+    func close() { tabs.forEach { $0.model.close() } }
 }
