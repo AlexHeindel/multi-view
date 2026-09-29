@@ -79,9 +79,12 @@ struct PaneView: View {
                     VStack(spacing: 14) {
                         Image(systemName: pane.folder == nil ? "photo.on.rectangle.angled" : "photo")
                             .font(.system(size: 32, weight: .ultraLight)).foregroundStyle(.secondary)
-                        Text(pane.folder == nil ? "Drop a folder here" : "No supported plots in this folder")
+                        Text(pane.folder == nil ? "Drop a folder here" :
+                             model.fileFilter == .all ? "No supported plots in this folder" :
+                             "No \(model.fileFilter.rawValue) files in this folder")
                             .font(.system(size: 13, weight: .medium))
-                        Text("PNG, JPEG, TIFF & PDF").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(model.fileFilter == .all ? "PNG, JPEG, TIFF & PDF" : "\(model.fileFilter.rawValue) only")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
                         Button("Open Folder…") { model.chooseFolder(for: pane) }
                     }.padding()
                 }
@@ -176,6 +179,12 @@ struct ContentView: View {
                     .disabled(model.panes.count == 4).help("Add a pane (⌘T)")
                 Button { model.removePane() } label: { Label("Remove Pane", systemImage: "minus.square") }
                     .disabled(model.panes.count == 1).help("Remove the selected pane")
+                Picker("File Type", selection: $model.fileFilter) {
+                    ForEach(FileFilter.allCases, id: \.self) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+                    .pickerStyle(.menu).help("Show PNG, PDF, or all supported files")
                 Button { splitVersion += 1 } label: { Label("Equalize Panes", systemImage: "square.split.2x2") }
                     .disabled(model.panes.count == 1).help("Return panes to equal sizes")
             }

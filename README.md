@@ -12,6 +12,8 @@ Click a pane to select it; its outline turns blue. Browse using the pane’s arr
 
 Drag a divider to resize the panes. With four panes, each row’s vertical divider and the divider between rows can be dragged. Use **Equalize Panes** in the toolbar to restore even sizes.
 
+Use the toolbar’s **File Type** menu to show only PNG, only PDF, or **All** supported files in every pane. Changing the filter keeps the current file when possible, or selects its same-named PNG/PDF counterpart. **All** also includes JPEG and TIFF.
+
 | Action | Shortcut / gesture |
 | --- | --- |
 | Previous / next file | Left / Right |

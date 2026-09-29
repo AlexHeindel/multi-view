@@ -103,6 +103,7 @@ enum Checks {
         try fm.createDirectory(at: unique.appendingPathComponent("nested.png"), withIntermediateDirectories: true)
         let files = try Catalog.files(in: unique)
         precondition(files.map(\.lastPathComponent) == ["broken.tif", "plot1.jpg", "plot2.png", "plot10.PNG"])
+        precondition(files.filter(FileFilter.png.includes).map(\.lastPathComponent) == ["plot2.png", "plot10.PNG"])
         precondition(Catalog.selection(in: files, preserving: files[2], oldIndex: 0) == 2)
         precondition(Catalog.selection(in: Array(files.prefix(2)), preserving: files[3], oldIndex: 3) == 1)
         precondition(Catalog.selection(in: [], preserving: nil, oldIndex: 10) == 0)
@@ -208,6 +209,27 @@ enum Checks {
         wait("folder drop") { model.active.folder == empty && !model.active.indexing }
         precondition(model.active.files.isEmpty && model.active.error == nil)
         model.panes.forEach { $0.close() }
+        let paired = unique.appendingPathComponent("paired")
+        try fm.createDirectory(at: paired, withIntermediateDirectories: true)
+        try fm.copyItem(at: small, to: paired.appendingPathComponent("same.png"))
+        try fm.copyItem(at: report, to: paired.appendingPathComponent("same.pdf"))
+        let filtered = WindowModel()
+        filtered.active.open(paired)
+        wait("paired folder") { !filtered.active.indexing && !filtered.active.loading }
+        filtered.fileFilter = .png
+        wait("PNG filter") { !filtered.active.loading }
+        precondition(filtered.active.files.map(\.lastPathComponent) == ["same.png"])
+        filtered.fileFilter = .pdf
+        wait("PDF filter") { !filtered.active.loading }
+        precondition(filtered.active.current?.lastPathComponent == "same.pdf")
+        filtered.addPane()
+        filtered.active.open(paired)
+        wait("new pane inherits filter") { !filtered.active.indexing && !filtered.active.loading }
+        precondition(filtered.active.files.map(\.lastPathComponent) == ["same.pdf"])
+        filtered.fileFilter = .all
+        wait("all files filter") { filtered.panes.allSatisfy { !$0.loading } }
+        precondition(filtered.panes.allSatisfy { $0.files.count == 2 })
+        filtered.panes.forEach { $0.close() }
         print("PASS: sorting, filtering, boundaries, linked navigation, refresh, folder drops, empty/missing/corrupt files, stale results, full-resolution zoom, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
     }

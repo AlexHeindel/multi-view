@@ -4,6 +4,22 @@ import ImageIO
 import PDFKit
 import UniformTypeIdentifiers
 
+enum FileFilter: String, CaseIterable {
+    case png = "PNG", pdf = "PDF", all = "All"
+
+    func includes(_ url: URL) -> Bool {
+        self == .all || url.pathExtension.lowercased() == rawValue.lowercased()
+    }
+
+    var allowedTypes: [UTType] {
+        switch self {
+        case .png: return [.png]
+        case .pdf: return [.pdf]
+        case .all: return [.png, .jpeg, .tiff, .pdf]
+        }
+    }
+}
+
 enum Catalog {
     static let extensions: Set<String> = ["png", "jpg", "jpeg", "tif", "tiff", "pdf"]
 
@@ -110,6 +126,8 @@ final class Pane: ObservableObject, Identifiable {
     let id = UUID()
     @Published var folder: URL?
     @Published var files: [URL] = []
+    var fileFilter: FileFilter = .all
+    private var allFiles: [URL] = []
     @Published var index = 0
     @Published var indexing = false
     @Published var loading = false
@@ -141,6 +159,7 @@ final class Pane: ObservableObject, Identifiable {
         scanNumber += 1
         let number = scanNumber
         self.folder = folder
+        allFiles = []
         files = []
         index = 0
         error = nil
@@ -155,9 +174,8 @@ final class Pane: ObservableObject, Identifiable {
                 self.indexing = false
                 switch result {
                 case .success(let files):
-                    self.files = files
-                    self.index = Catalog.selection(in: files, preserving: previous, oldIndex: previousIndex)
-                    self.load()
+                    self.allFiles = files
+                    self.showFiles(preserving: previous, oldIndex: previousIndex)
                 case .failure(let error): self.error = error.localizedDescription
                 }
             }
@@ -170,6 +188,26 @@ final class Pane: ObservableObject, Identifiable {
         guard let folder else { return }
         Loader.shared.previews.removeAllObjects()
         open(folder, refresh: true)
+    }
+
+    func setFilter(_ filter: FileFilter) {
+        guard fileFilter != filter else { return }
+        let previous = current
+        let previousIndex = index
+        fileFilter = filter
+        if allFiles.isEmpty && error != nil { return }
+        showFiles(preserving: previous, oldIndex: previousIndex)
+    }
+
+    private func showFiles(preserving previous: URL?, oldIndex: Int) {
+        let visible = allFiles.filter(fileFilter.includes)
+        let match = previous.flatMap { old -> URL? in
+            if visible.contains(old) { return old }
+            return visible.first { $0.deletingPathExtension().lastPathComponent == old.deletingPathExtension().lastPathComponent }
+        }
+        files = visible
+        index = Catalog.selection(in: visible, preserving: match, oldIndex: oldIndex)
+        load()
     }
 
     func select(_ url: URL) {
@@ -292,6 +330,9 @@ final class WindowModel: ObservableObject {
     @Published var panes = [Pane()]
     @Published var activeID = UUID()
     @Published var linked = false
+    @Published var fileFilter: FileFilter = .all {
+        didSet { panes.forEach { $0.setFilter(fileFilter) } }
+    }
     private var subscriptions: [AnyCancellable] = []
     var active: Pane { panes.first(where: { $0.id == activeID }) ?? panes[0] }
 
@@ -309,6 +350,7 @@ final class WindowModel: ObservableObject {
     func addPane() {
         guard panes.count < 4 else { return }
         let pane = Pane()
+        pane.fileFilter = fileFilter
         panes.append(pane)
         activeID = pane.id
         observePanes()
@@ -382,7 +424,7 @@ final class WindowModel: ObservableObject {
         let panel = NSOpenPanel()
         panel.title = "Choose an image"
         panel.prompt = "Open Image"
-        panel.allowedContentTypes = [.png, .jpeg, .tiff, .pdf]
+        panel.allowedContentTypes = fileFilter.allowedTypes
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
