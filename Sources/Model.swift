@@ -383,10 +383,12 @@ final class WindowModel: ObservableObject {
     }
 
     func removePane() {
-        guard panes.count > 1, let index = panes.firstIndex(where: { $0.id == activeID }) else { return }
+        guard panes.count > 1, let selected = panes.firstIndex(where: { $0.id == activeID }) else { return }
+        let index = panes[selected].folder == nil ? selected
+            : panes.lastIndex(where: { $0.folder == nil }) ?? selected
         panes[index].close()
         panes.remove(at: index)
-        activeID = panes[min(index, panes.count - 1)].id
+        if index == selected { activeID = panes[min(index, panes.count - 1)].id }
         observePanes()
     }
 
@@ -469,7 +471,10 @@ final class WindowModel: ObservableObject {
 struct ViewerTab: Identifiable {
     let id = UUID()
     let number: Int
+    var name: String?
     let model = WindowModel()
+
+    var title: String { name ?? "Tab \(number)" }
 }
 
 final class TabsModel: ObservableObject {
@@ -514,6 +519,21 @@ final class TabsModel: ObservableObject {
         tabs.remove(at: index)
         if activeID == id { activeID = tabs[min(index, tabs.count - 1)].id }
         observeTabs()
+    }
+
+    @discardableResult
+    func moveTab(_ sourceID: UUID, to targetID: UUID) -> Bool {
+        guard let source = tabs.firstIndex(where: { $0.id == sourceID }),
+              let target = tabs.firstIndex(where: { $0.id == targetID }), source != target else { return false }
+        let tab = tabs.remove(at: source)
+        tabs.insert(tab, at: target)
+        return true
+    }
+
+    func renameTab(_ id: UUID, to name: String) {
+        guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        tabs[index].name = trimmed.isEmpty ? nil : trimmed
     }
 
     func close() { tabs.forEach { $0.model.close() } }

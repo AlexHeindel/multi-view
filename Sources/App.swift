@@ -181,7 +181,7 @@ struct ContentView: View {
                 Button { model.addPane() } label: { Label("Add Pane", systemImage: "rectangle.split.2x1") }
                     .disabled(model.panes.count == 4).help("Add a pane (⌘T)")
                 Button { model.removePane() } label: { Label("Remove Pane", systemImage: "minus.square") }
-                    .disabled(model.panes.count == 1).help("Remove the selected pane")
+                    .disabled(model.panes.count == 1).help("Remove an empty pane first, or the selected pane")
                 Picker("File Type", selection: $model.fileFilter) {
                     ForEach(FileFilter.allCases, id: \.self) { filter in
                         Text(filter.rawValue).tag(filter)
@@ -206,10 +206,28 @@ struct ContentView: View {
 
 struct TabbedContentView: View {
     @ObservedObject var tabs: TabsModel
+    @State private var editingID: UUID?
+    @State private var draftName = ""
+    @FocusState private var nameFocused: Bool
+
+    private func beginRename(_ tab: ViewerTab) {
+        editingID = tab.id
+        draftName = tab.name ?? ""
+    }
+
+    private func finishRename() {
+        guard let editingID else { return }
+        tabs.renameTab(editingID, to: draftName)
+        self.editingID = nil
+        nameFocused = false
+    }
 
     var body: some View {
         ContentView(model: tabs.active.model)
             .id(tabs.activeID)
+            .onChange(of: nameFocused) { _, focused in
+                if !focused { finishRename() }
+            }
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     ScrollViewReader { scroll in
@@ -217,9 +235,24 @@ struct TabbedContentView: View {
                             HStack(spacing: 4) {
                                 ForEach(tabs.tabs) { tab in
                                     HStack(spacing: 6) {
-                                        Button("Tab \(tab.number)") { tabs.activeID = tab.id }
-                                            .accessibilityLabel("Tab \(tab.number)")
-                                            .fixedSize()
+                                        if editingID == tab.id {
+                                            TextField("Name", text: $draftName)
+                                                .textFieldStyle(.roundedBorder)
+                                                .frame(width: 120)
+                                                .focused($nameFocused)
+                                                .onAppear { nameFocused = true }
+                                                .onSubmit { finishRename() }
+                                                .onExitCommand {
+                                                    editingID = nil
+                                                    nameFocused = false
+                                                }
+                                        } else {
+                                            Button { tabs.activeID = tab.id } label: {
+                                                Text(tab.title).lineLimit(1).frame(maxWidth: 160)
+                                            }
+                                            .accessibilityLabel(tab.title)
+                                            .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(tab) })
+                                        }
                                         if tabs.tabs.count > 1 {
                                             Button { tabs.closeTab(tab.id) } label: {
                                                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
@@ -234,6 +267,12 @@ struct TabbedContentView: View {
                                                 in: RoundedRectangle(cornerRadius: 7))
                                     .fixedSize()
                                     .id(tab.id)
+                                    .help("Double-click the tab name to rename; drag to reorder")
+                                    .draggable(tab.id.uuidString)
+                                    .dropDestination(for: String.self) { items, _ in
+                                        guard let source = items.first.flatMap(UUID.init(uuidString:)) else { return false }
+                                        return tabs.moveTab(source, to: tab.id)
+                                    }
                                 }
                                 Button { tabs.addTab() } label: { Image(systemName: "plus") }
                                     .disabled(tabs.tabs.count == 8)
@@ -246,7 +285,8 @@ struct TabbedContentView: View {
                             .padding(.horizontal, 8)
                         }
                         .scrollIndicators(.hidden)
-                        .frame(width: min(CGFloat(tabs.tabs.count) * 90 + 40, 450), height: 36)
+                        .frame(width: min(CGFloat(tabs.tabs.count) * 90 + 40 + (editingID == nil ? 0 : 80), 450),
+                               height: 36)
                         .onChange(of: tabs.activeID) { _, id in
                             withAnimation {
                                 scroll.scrollTo(id == tabs.tabs.last?.id ? AnyHashable("plus") : AnyHashable(id),
@@ -271,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let model = self?.tabs?.active.model, let window = NSApp.keyWindow,
                   window.identifier?.rawValue == "viewer" || window.title == "Multi-view",
                   window.attachedSheet == nil else { return event }
+            if window.firstResponder is NSTextView { return event }
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             guard modifiers.intersection([.command, .control, .option]).isEmpty else { return event }
             switch event.keyCode {

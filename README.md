@@ -34,7 +34,7 @@ The build script compiles for the current Mac's architecture and ad-hoc signs `b
 
 ## Use
 
-Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. The tab strip scrolls horizontally when all tabs do not fit. Click a pane to select it; the selected pane has a blue outline.
+Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Drag tabs to reorder them, or double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved. The tab strip scrolls horizontally when all tabs do not fit. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
 
 Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. **Link Navigation** moves populated panes together and stops when any pane reaches the start or end of its folder.
 
@@ -45,7 +45,7 @@ Use the **File Type** menu to show one format or **All**. Changing the filter ke
 | Open folder in selected pane | Command-O |
 | New tab | Command-N |
 | Add pane | Command-T |
-| Remove selected pane | Command-Shift-W |
+| Remove pane (empty pane first) | Command-Shift-W |
 | Toggle linked navigation | Command-L |
 | Refresh selected folder | Command-R |
 | Fit image to pane | Command-0 |

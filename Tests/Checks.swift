@@ -242,6 +242,19 @@ enum Checks {
         wait("folder drop") { model.active.folder == empty && !model.active.indexing }
         precondition(model.active.files.isEmpty && model.active.error == nil)
         model.panes.forEach { $0.close() }
+        let removal = WindowModel()
+        removal.active.folder = unique
+        removal.addPane()
+        let blankID = removal.activeID
+        removal.addPane()
+        removal.active.folder = empty
+        let selectedID = removal.activeID
+        removal.removePane()
+        precondition(removal.panes.count == 2 && !removal.panes.contains { $0.id == blankID })
+        precondition(removal.activeID == selectedID && removal.panes.allSatisfy { $0.folder != nil })
+        removal.removePane()
+        precondition(removal.panes.count == 1 && removal.panes[0].folder == unique)
+        removal.close()
         let tabs = TabsModel()
         let firstTab = tabs.active.id
         tabs.active.model.addPane()
@@ -256,13 +269,27 @@ enum Checks {
         wait("tab image reload") { !retainedPane.loading && retainedPane.raster != nil }
         tabs.addTab()
         precondition(tabs.tabs.last?.id == tabs.activeID && tabs.tabs[1].id == secondTab)
+        let thirdTab = tabs.active.id
+        tabs.renameTab(secondTab, to: "  Comparison  ")
+        precondition(tabs.tabs[1].title == "Comparison")
+        precondition(tabs.moveTab(thirdTab, to: firstTab))
+        precondition(tabs.tabs.map(\.number) == [3, 1, 2] && tabs.activeID == thirdTab)
+        precondition(tabs.tabs[2].title == "Comparison")
+        precondition(tabs.moveTab(firstTab, to: secondTab))
+        precondition(tabs.tabs.map(\.number) == [3, 2, 1])
+        precondition(tabs.moveTab(firstTab, to: secondTab))
+        precondition(tabs.tabs.map(\.number) == [3, 1, 2])
+        tabs.renameTab(secondTab, to: " ")
+        precondition(tabs.tabs[2].title == "Tab 2")
         for _ in 0..<8 { tabs.addTab() }
         precondition(tabs.tabs.count == 8 && tabs.active.model.panes.count == 1)
-        precondition(!tabs.active.model.linked && tabs.tabs[0].model.panes.count == 2)
+        precondition(!tabs.active.model.linked && tabs.tabs.first(where: { $0.id == firstTab })?.model.panes.count == 2)
         tabs.closeTab(firstTab)
         precondition(tabs.tabs.count == 7 && tabs.active.model.panes.count == 1)
+        precondition(tabs.tabs.first(where: { $0.id == thirdTab })?.number == 3)
         tabs.addTab()
         precondition(tabs.tabs.count == 8 && Set(tabs.tabs.map(\.number)).count == 8)
+        precondition(tabs.active.number == 1 && tabs.tabs.first(where: { $0.id == secondTab })?.number == 2)
         tabs.closeTab(tabs.activeID)
         precondition(tabs.tabs.count == 7 && tabs.tabs.contains { $0.id == tabs.activeID })
         tabs.close()
@@ -305,7 +332,7 @@ enum Checks {
         wait("all files filter") { filtered.panes.allSatisfy { !$0.loading } }
         precondition(filtered.panes.allSatisfy { $0.files.count == 6 })
         filtered.panes.forEach { $0.close() }
-        print("PASS: eight tabs, PNG/JPEG/TIFF/GIF/SVG/PDF filtering and loading, navigation, refresh, drops, stale results, zoom, and multipage PDF.")
+        print("PASS: pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, zoom, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
     }
 
