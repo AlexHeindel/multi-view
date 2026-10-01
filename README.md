@@ -7,6 +7,7 @@ Multi-view is a native macOS app for comparing images and plots from several fol
 ## Features
 
 - Open up to eight tabs, each with one to four resizable panes. Every tab keeps its own folders, file filter, selected pane, and linked navigation setting.
+- Reopen the app to restore tabs, names, folders, selected files, filters, and linked navigation. Missing or inaccessible folders reopen as blank panes. **Clear All** in the top toolbar asks for confirmation before clearing the saved session and returning to one blank tab and pane.
 - Browse a different folder in each pane. Use arrows or the keyboard to move through files, or link navigation to advance populated panes together while preserving their offsets.
 - View PNG, JPEG (`.jpg` and `.jpeg`), TIFF (`.tif` and `.tiff`), GIF, SVG, and PDF files. GIFs animate, SVGs stay sharp when zoomed, and multipage PDFs have page controls.
 - Filter every pane in a tab by file type or show all supported files. Choose a specific file with the macOS file picker, or drop a folder onto a pane.
@@ -38,6 +39,8 @@ Choose **Open Folder** in a pane to load images. Click the **+** beside the righ
 
 Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. **Link Navigation** moves populated panes together and stops when any pane reaches the start or end of its folder.
 
+Your tabs and selected files are remembered when you close the app. To start over, click **Clear All** in the top toolbar, then confirm with **Clear All** in the pop-up. This clears every tab and pane and the saved session, leaving one blank tab with one pane. Your source files and folders are kept. Choose **Cancel** to keep the current session.
+
 | Action | Shortcut or gesture |
 | --- | --- |
 | Previous / next file | Left / Right |
@@ -59,7 +62,7 @@ You can drag pane dividers to resize the layout and use **Equalize Panes** to re
 
 Run the checks with `./build.sh test`. An optional large-image stress check is available with `./build.sh stress`; it creates 40,000 hard-linked fixture entries and loads four 49-megapixel images, so it uses substantial memory and disk space. Generated files stay in the ignored `.build/` and `build/` directories.
 
-Folder indexing and image decoding run off the main thread. Raster previews are limited to 1600 pixels on their longest edge, and full-resolution images are requested when zoom requires them. Switching tabs releases decoded images from the hidden tab. Sessions are not saved, and folders are not watched for changes; use **Refresh** to rescan a folder.
+Folder indexing and image decoding run off the main thread. Raster previews are limited to 1600 pixels on their longest edge, and full-resolution images are requested when zoom requires them. Switching tabs releases decoded images from the hidden tab. Sessions are saved locally on exit using folder and file paths; moved folders are not followed. Pane sizes and zoom reset on reopening. Folders are not watched for changes; use **Refresh** to rescan a folder.
 
 ## License
 

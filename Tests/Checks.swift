@@ -332,8 +332,85 @@ enum Checks {
         wait("all files filter") { filtered.panes.allSatisfy { !$0.loading } }
         precondition(filtered.panes.allSatisfy { $0.files.count == 6 })
         filtered.panes.forEach { $0.close() }
-        print("PASS: pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, zoom, and multipage PDF.")
+        try checkSession(folder: paired, image: jpeg)
+        print("PASS: session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, zoom, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
+    }
+
+    static func checkSession(folder: URL, image: URL) throws {
+        let suite = "local.multiview.checks.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let moved = folder.appendingPathComponent("moved")
+        let deleted = folder.appendingPathComponent("deleted")
+        try fm.createDirectory(at: moved, withIntermediateDirectories: true)
+        try fm.createDirectory(at: deleted, withIntermediateDirectories: true)
+        let selected = folder.appendingPathComponent("selected.jpg")
+        try fm.copyItem(at: image, to: selected)
+        defer {
+            try? fm.removeItem(at: selected)
+            try? fm.removeItem(at: folder.appendingPathComponent("renamed"))
+        }
+
+        let original = TabsModel(defaults: defaults)
+        let first = original.active.id
+        original.renameTab(first, to: "Comparison")
+        let model = original.active.model
+        model.fileFilter = .jpeg
+        model.linked = true
+        model.active.open(folder, selecting: selected)
+        model.addPane(); model.active.open(moved)
+        model.addPane(); model.active.open(deleted)
+        model.addPane()
+        model.activeID = model.panes[0].id
+        wait("session setup") { model.panes.allSatisfy { !$0.indexing && !$0.loading } }
+        original.addTab()
+        original.active.model.active.open(folder)
+        wait("second session tab") { !original.active.model.active.indexing && !original.active.model.active.loading }
+        original.moveTab(original.activeID, to: first)
+        original.activeID = first
+        original.close()
+        precondition(defaults.data(forKey: TabsModel.sessionKey) != nil)
+        try fm.moveItem(at: moved, to: folder.appendingPathComponent("renamed"))
+        try fm.removeItem(at: deleted)
+
+        let restored = TabsModel(defaults: defaults)
+        // Quitting while folders are still indexing must retain the selected file path.
+        restored.saveSession()
+        let reopened = TabsModel(defaults: defaults)
+        wait("session restore") {
+            reopened.tabs.allSatisfy { $0.model.panes.allSatisfy { !$0.indexing && !$0.loading } }
+        }
+        precondition(reopened.tabs.map(\.number) == [2, 1] && reopened.active.number == 1)
+        precondition(reopened.active.title == "Comparison")
+        let restoredModel = reopened.active.model
+        precondition(restoredModel.panes.count == 4 && restoredModel.activeID == restoredModel.panes[0].id)
+        precondition(restoredModel.linked && restoredModel.fileFilter == .jpeg)
+        precondition(restoredModel.active.folder?.path == folder.path && restoredModel.active.current?.path == selected.path,
+                     "Restored folder=\(restoredModel.active.folder?.path ?? "nil"), file=\(restoredModel.active.current?.path ?? "nil")")
+        precondition(restoredModel.panes.dropFirst().allSatisfy { $0.folder == nil && $0.error == nil && $0.files.isEmpty })
+        precondition(reopened.tabs[0].model.active.folder?.path == folder.path)
+        restored.tabs.forEach { $0.model.close() }
+        reopened.close()
+
+        // A missing image falls back to a supported file in the surviving folder.
+        try fm.removeItem(at: selected)
+        let missingImage = TabsModel(defaults: defaults)
+        wait("missing saved image") { !missingImage.active.model.active.indexing && !missingImage.active.model.active.loading }
+        precondition(missingImage.active.model.active.current?.lastPathComponent == "same.jpg")
+        missingImage.clearAll()
+        precondition(defaults.data(forKey: TabsModel.sessionKey) == nil)
+        precondition(missingImage.tabs.count == 1 && missingImage.active.number == 1)
+        precondition(missingImage.active.model.panes.count == 1 && missingImage.active.model.active.folder == nil)
+        precondition(!missingImage.active.model.linked && missingImage.active.model.fileFilter == .all)
+        missingImage.close()
+        let fresh = TabsModel(defaults: defaults)
+        precondition(fresh.tabs.count == 1 && fresh.active.model.panes.count == 1 && fresh.active.model.active.folder == nil)
+        fresh.close()
+        defaults.set(Data("invalid session".utf8), forKey: TabsModel.sessionKey)
+        let corrupt = TabsModel(defaults: defaults)
+        precondition(corrupt.tabs.count == 1 && corrupt.active.model.active.folder == nil)
+        corrupt.close()
     }
 
     static func residentMB() -> Double {

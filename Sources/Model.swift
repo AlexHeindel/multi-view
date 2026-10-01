@@ -4,7 +4,7 @@ import ImageIO
 import PDFKit
 import UniformTypeIdentifiers
 
-enum FileFilter: String, CaseIterable {
+enum FileFilter: String, CaseIterable, Codable {
     case png = "PNG", jpeg = "JPEG", tiff = "TIFF", gif = "GIF", svg = "SVG", pdf = "PDF", all = "All"
 
     var extensions: [String] {
@@ -157,6 +157,8 @@ final class Pane: ObservableObject, Identifiable {
     @Published var command: ViewCommand = .fit
     @Published var commandNumber = 0
     var current: URL? { files.indices.contains(index) ? files[index] : nil }
+    var selectedURL: URL? { current ?? pendingSelection }
+    private var pendingSelection: URL?
     private var scanNumber = 0
     private var loadNumber = 0
     private var scan: Operation?
@@ -168,8 +170,9 @@ final class Pane: ObservableObject, Identifiable {
         commandNumber += 1
     }
 
-    func open(_ folder: URL, refresh: Bool = false, selecting selected: URL? = nil) {
+    func open(_ folder: URL, refresh: Bool = false, selecting selected: URL? = nil, restoring: Bool = false) {
         let previous = selected ?? (refresh ? current : nil)
+        pendingSelection = previous
         let previousIndex = refresh ? index : 0
         cancelLoads()
         scan?.cancel()
@@ -193,7 +196,10 @@ final class Pane: ObservableObject, Identifiable {
                 case .success(let files):
                     self.allFiles = files
                     self.showFiles(preserving: previous, oldIndex: previousIndex)
-                case .failure(let error): self.error = error.localizedDescription
+                case .failure(let error):
+                    self.pendingSelection = nil
+                    if restoring { self.folder = nil }
+                    else { self.error = error.localizedDescription }
                 }
             }
         }
@@ -224,6 +230,7 @@ final class Pane: ObservableObject, Identifiable {
         }
         files = visible
         index = Catalog.selection(in: visible, preserving: match, oldIndex: oldIndex)
+        pendingSelection = nil
         load()
     }
 
@@ -477,7 +484,38 @@ struct ViewerTab: Identifiable {
     var title: String { name ?? "Tab \(number)" }
 }
 
+private struct SavedSession: Codable {
+    struct SavedPane: Codable {
+        var folder: String?
+        var file: String?
+    }
+    struct SavedTab: Codable {
+        var number: Int
+        var name: String?
+        var panes: [SavedPane]
+        var activePane: Int
+        var filter: FileFilter
+        var linked: Bool
+    }
+    var tabs: [SavedTab]
+    var activeTab: Int
+
+    var isValid: Bool {
+        (1...8).contains(tabs.count) && tabs.indices.contains(activeTab)
+            && Set(tabs.map(\.number)).count == tabs.count
+            && tabs.allSatisfy {
+                (1...8).contains($0.number) && (1...4).contains($0.panes.count)
+                    && $0.panes.indices.contains($0.activePane)
+                    && $0.panes.allSatisfy { pane in
+                        [pane.folder, pane.file].compactMap { $0 }.allSatisfy { $0.hasPrefix("/") }
+                    }
+            }
+    }
+}
+
 final class TabsModel: ObservableObject {
+    static let sessionKey = "viewerSession"
+    private let defaults: UserDefaults?
     @Published private(set) var tabs: [ViewerTab]
     @Published var activeID: UUID {
         didSet {
@@ -491,10 +529,30 @@ final class TabsModel: ObservableObject {
     private var subscriptions: [AnyCancellable] = []
     var active: ViewerTab { tabs.first(where: { $0.id == activeID }) ?? tabs[0] }
 
-    init() {
+    init(defaults: UserDefaults? = nil) {
+        self.defaults = defaults
         let first = ViewerTab(number: 1)
         tabs = [first]
         activeID = first.id
+        if let data = defaults?.data(forKey: Self.sessionKey),
+           let saved = try? JSONDecoder().decode(SavedSession.self, from: data), saved.isValid {
+            tabs = saved.tabs.map { savedTab in
+                var tab = ViewerTab(number: savedTab.number)
+                tab.name = savedTab.name
+                let model = tab.model
+                for _ in savedTab.panes.dropFirst() { model.addPane() }
+                model.fileFilter = savedTab.filter
+                model.linked = savedTab.linked
+                model.activeID = model.panes[savedTab.activePane].id
+                for (pane, savedPane) in zip(model.panes, savedTab.panes) {
+                    guard let path = savedPane.folder else { continue }
+                    pane.open(URL(fileURLWithPath: path),
+                              selecting: savedPane.file.map { URL(fileURLWithPath: $0) }, restoring: true)
+                }
+                return tab
+            }
+            activeID = tabs[saved.activeTab].id
+        }
         observeTabs()
     }
 
@@ -536,5 +594,30 @@ final class TabsModel: ObservableObject {
         tabs[index].name = trimmed.isEmpty ? nil : trimmed
     }
 
-    func close() { tabs.forEach { $0.model.close() } }
+    func saveSession() {
+        guard let defaults else { return }
+        let saved = SavedSession(tabs: tabs.map { tab in
+            let model = tab.model
+            return SavedSession.SavedTab(number: tab.number, name: tab.name,
+                panes: model.panes.map { SavedSession.SavedPane(folder: $0.folder?.path, file: $0.selectedURL?.path) },
+                activePane: model.panes.firstIndex { $0.id == model.activeID } ?? 0,
+                filter: model.fileFilter, linked: model.linked)
+        }, activeTab: tabs.firstIndex { $0.id == activeID } ?? 0)
+        if let data = try? JSONEncoder().encode(saved) { defaults.set(data, forKey: Self.sessionKey) }
+    }
+
+    func clearAll() {
+        tabs.forEach { $0.model.close() }
+        let first = ViewerTab(number: 1)
+        tabs = [first]
+        activeID = first.id
+        observeTabs()
+        defaults?.removeObject(forKey: Self.sessionKey)
+        Loader.shared.previews.removeAllObjects()
+    }
+
+    func close() {
+        saveSession()
+        tabs.forEach { $0.model.close() }
+    }
 }

@@ -208,6 +208,7 @@ struct TabbedContentView: View {
     @ObservedObject var tabs: TabsModel
     @State private var editingID: UUID?
     @State private var draftName = ""
+    @State private var confirmingClearAll = false
     @FocusState private var nameFocused: Bool
 
     private func beginRename(_ tab: ViewerTab) {
@@ -228,7 +229,21 @@ struct TabbedContentView: View {
             .onChange(of: nameFocused) { _, focused in
                 if !focused { finishRename() }
             }
+            .alert("Clear all tabs and panes?", isPresented: $confirmingClearAll) {
+                Button("Clear All", role: .destructive) {
+                    editingID = nil
+                    nameFocused = false
+                    tabs.clearAll()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This clears the saved session and returns to one blank tab and pane. Your files and folders are kept.")
+            }
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { confirmingClearAll = true } label: { Label("Clear All", systemImage: "arrow.counterclockwise") }
+                        .help("Clear the saved session and return to one blank tab and pane")
+                }
                 ToolbarItem(placement: .principal) {
                     ScrollViewReader { scroll in
                         ScrollView(.horizontal) {
@@ -335,7 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct MultiViewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var tabs = TabsModel()
+    @StateObject private var tabs = TabsModel(defaults: .standard)
 
     var body: some Scene {
         Window("Multi-view", id: "viewer") {
