@@ -53,8 +53,8 @@ Your tabs and selected files are remembered when you close the app. To start ove
 | Refresh selected folder | Command-R |
 | Fit image to pane | Command-0 |
 | Actual size | Command-1 |
-| Zoom | Trackpad pinch |
-| Pan image | Drag or scroll |
+| Zoom | Trackpad pinch or scroll |
+| Pan image | Drag |
 
 You can drag pane dividers to resize the layout and use **Equalize Panes** to reset it. The **Compare** menu includes **Reveal File in Finder**. PDFs use PDFKit's native 100% scale; raster **1:1** means one image pixel per screen pixel, including on Retina displays.
 

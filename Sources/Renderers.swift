@@ -2,6 +2,13 @@ import SwiftUI
 import AppKit
 import PDFKit
 
+// ponytail: fixed wheel sensitivity; expose a setting if different mice need calibration.
+private func wheelZoomFactor(_ event: NSEvent) -> CGFloat {
+    let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / 10 : event.scrollingDeltaY
+    // One mouse notch may report several lines, so cap each event at one zoom step.
+    return CGFloat(pow(1.08, Double(max(-1, min(1, delta)))))
+}
+
 final class CenteredClipView: NSClipView {
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var result = super.constrainBoundsRect(proposedBounds)
@@ -96,7 +103,7 @@ final class ImageScrollView: NSScrollView {
         minMagnification = 0.00001
         maxMagnification = 32
         documentView = canvas
-        setAccessibilityLabel("Plot image. Pinch to zoom; drag or scroll to pan.")
+        setAccessibilityLabel("Plot image. Pinch or scroll to zoom; drag to pan.")
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -162,7 +169,18 @@ final class ImageScrollView: NSScrollView {
 
     override func scrollWheel(with event: NSEvent) {
         canvas.activate?()
-        super.scrollWheel(with: event)
+        guard event.scrollingDeltaY != 0 else {
+            super.scrollWheel(with: event)
+            return
+        }
+        wheelZoom(by: wheelZoomFactor(event), centeredAt: canvas.convert(event.locationInWindow, from: nil))
+    }
+
+    private func wheelZoom(by factor: CGFloat, centeredAt point: NSPoint) {
+        fitting = false
+        setMagnification(max(minMagnification, min(maxMagnification, magnification * factor)),
+                         centeredAt: point)
+        checkDetail()
     }
 
     private func checkDetail() {
@@ -219,13 +237,41 @@ struct NativeImageView: NSViewRepresentable {
 
 final class PlotPDFView: PDFView {
     var activate: (() -> Void)?
+    private var wheelMonitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+        wheelMonitor = nil
+        guard window != nil else { return }
+        wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, event.window === self.window, !self.isHiddenOrHasHiddenAncestor,
+                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)),
+                  event.scrollingDeltaY != 0 else { return event }
+            self.scrollWheel(with: event)
+            return nil
+        }
+    }
+
+    deinit { if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) } }
+
     override func mouseDown(with event: NSEvent) {
         activate?()
         super.mouseDown(with: event)
     }
     override func scrollWheel(with event: NSEvent) {
         activate?()
-        super.scrollWheel(with: event)
+        guard event.scrollingDeltaY != 0 else {
+            super.scrollWheel(with: event)
+            return
+        }
+        wheelZoom(by: wheelZoomFactor(event))
+    }
+
+    private func wheelZoom(by factor: CGFloat) {
+        let scale = scaleFactor
+        autoScales = false
+        scaleFactor = max(minScaleFactor, min(maxScaleFactor, scale * factor))
     }
     override func magnify(with event: NSEvent) {
         activate?()
@@ -254,7 +300,7 @@ struct DocumentView: NSViewRepresentable {
         view.backgroundColor = .underPageBackgroundColor
         view.minScaleFactor = 0.01
         view.maxScaleFactor = 32
-        view.setAccessibilityLabel("PDF plot. Pinch to zoom; scroll to pan.")
+        view.setAccessibilityLabel("PDF plot. Pinch or scroll to zoom.")
         context.coordinator.observation = NotificationCenter.default.addObserver(
             forName: .PDFViewPageChanged, object: view, queue: .main
         ) { [weak pane, weak view] _ in

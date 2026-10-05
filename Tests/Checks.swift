@@ -160,6 +160,61 @@ enum Checks {
         precondition(abs(scroll.magnification - 0.5) < 0.001)
         scroll.fit()
         precondition(scroll.fitting && scroll.magnification < 0.5)
+        let fittedScale = scroll.magnification
+        let wheelUp = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                              wheelCount: 1, wheel1: 1, wheel2: 0, wheel3: 0)!)!
+        let wheelDown = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                                wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0)!)!
+        let preciseUp = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                                wheelCount: 1, wheel1: 10, wheel2: 0, wheel3: 0)!)!
+        let preciseDown = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                                  wheelCount: 1, wheel1: -10, wheel2: 0, wheel3: 0)!)!
+        let fastWheelUp = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                                  wheelCount: 1, wheel1: 3, wheel2: 0, wheel3: 0)!)!
+        let fastWheelDown = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                                    wheelCount: 1, wheel1: -3, wheel2: 0, wheel3: 0)!)!
+        precondition(!wheelUp.hasPreciseScrollingDeltas)
+        precondition(preciseUp.hasPreciseScrollingDeltas)
+        for (up, down) in [(wheelUp, wheelDown), (preciseUp, preciseDown), (fastWheelUp, fastWheelDown)] {
+            scroll.scrollWheel(with: up)
+            precondition(!scroll.fitting && abs(scroll.magnification / fittedScale - 1.08) < 0.001)
+            scroll.scrollWheel(with: down)
+            precondition(abs(scroll.magnification - fittedScale) < 0.001)
+        }
+        let zoomWindow = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+        zoomWindow.contentView = scroll
+        zoomWindow.makeKeyAndOrderFront(nil)
+        let windowScale = scroll.magnification
+        func imageWindowScroll(_ delta: Int32) {
+            let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                             wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
+            cg.location = zoomWindow.convertPoint(toScreen: NSPoint(x: 300, y: 200))
+            zoomWindow.sendEvent(NSEvent(cgEvent: cg)!)
+        }
+        imageWindowScroll(10)
+        precondition(abs(scroll.magnification / windowScale - 1.08) < 0.001,
+                     "Precise scroll must zoom one step through the window")
+        imageWindowScroll(-10)
+        precondition(abs(scroll.magnification - windowScale) < 0.001)
+        zoomWindow.orderOut(nil)
+        scroll.fit()
+        precondition(scroll.fitting && abs(scroll.magnification - fittedScale) < 0.001)
+        scroll.actualSize()
+        precondition(abs(scroll.magnification - 1 / zoomWindow.backingScaleFactor) < 0.001)
+        let pdfZoom = PlotPDFView()
+        pdfZoom.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        pdfZoom.document = PDFDocument(url: report)
+        pdfZoom.autoScales = true
+        let pdfScale = pdfZoom.scaleFactor
+        for (up, down) in [(wheelUp, wheelDown), (preciseUp, preciseDown), (fastWheelUp, fastWheelDown)] {
+            pdfZoom.scrollWheel(with: up)
+            precondition(!pdfZoom.autoScales && abs(pdfZoom.scaleFactor / pdfScale - 1.08) < 0.001)
+            pdfZoom.scrollWheel(with: down)
+            precondition(abs(pdfZoom.scaleFactor - pdfScale) < 0.001)
+        }
+        pdfZoom.autoScales = true
+        precondition(pdfZoom.autoScales)
         precondition(PDFDocument(url: report)?.pageCount == 3)
 
         let pane = Pane()
