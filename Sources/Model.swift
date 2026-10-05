@@ -361,6 +361,7 @@ final class WindowModel: ObservableObject {
     @Published var panes = [Pane()]
     @Published var activeID = UUID()
     @Published var linked = false
+    @Published var stacked = false
     @Published var fileFilter: FileFilter = .all {
         didSet { panes.forEach { $0.setFilter(fileFilter) } }
     }
@@ -496,6 +497,7 @@ private struct SavedSession: Codable {
         var activePane: Int
         var filter: FileFilter
         var linked: Bool
+        var stacked: Bool?
     }
     var tabs: [SavedTab]
     var activeTab: Int
@@ -543,6 +545,7 @@ final class TabsModel: ObservableObject {
                 for _ in savedTab.panes.dropFirst() { model.addPane() }
                 model.fileFilter = savedTab.filter
                 model.linked = savedTab.linked
+                model.stacked = savedTab.stacked ?? false
                 model.activeID = model.panes[savedTab.activePane].id
                 for (pane, savedPane) in zip(model.panes, savedTab.panes) {
                     guard let path = savedPane.folder else { continue }
@@ -601,7 +604,7 @@ final class TabsModel: ObservableObject {
             return SavedSession.SavedTab(number: tab.number, name: tab.name,
                 panes: model.panes.map { SavedSession.SavedPane(folder: $0.folder?.path, file: $0.selectedURL?.path) },
                 activePane: model.panes.firstIndex { $0.id == model.activeID } ?? 0,
-                filter: model.fileFilter, linked: model.linked)
+                filter: model.fileFilter, linked: model.linked, stacked: model.stacked)
         }, activeTab: tabs.firstIndex { $0.id == activeID } ?? 0)
         if let data = try? JSONEncoder().encode(saved) { defaults.set(data, forKey: Self.sessionKey) }
     }

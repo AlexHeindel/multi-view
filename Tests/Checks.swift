@@ -358,6 +358,7 @@ enum Checks {
         let model = original.active.model
         model.fileFilter = .jpeg
         model.linked = true
+        model.stacked = true
         model.active.open(folder, selecting: selected)
         model.addPane(); model.active.open(moved)
         model.addPane(); model.active.open(deleted)
@@ -370,7 +371,18 @@ enum Checks {
         original.moveTab(original.activeID, to: first)
         original.activeID = first
         original.close()
-        precondition(defaults.data(forKey: TabsModel.sessionKey) != nil)
+        let savedData = defaults.data(forKey: TabsModel.sessionKey)!
+        var legacy = try JSONSerialization.jsonObject(with: savedData) as! [String: Any]
+        legacy["tabs"] = (legacy["tabs"] as! [[String: Any]]).map { tab in
+            var tab = tab
+            tab.removeValue(forKey: "stacked")
+            return tab
+        }
+        defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: TabsModel.sessionKey)
+        let oldSession = TabsModel(defaults: defaults)
+        precondition(oldSession.tabs.allSatisfy { !$0.model.stacked })
+        oldSession.tabs.forEach { $0.model.close() }
+        defaults.set(savedData, forKey: TabsModel.sessionKey)
         try fm.moveItem(at: moved, to: folder.appendingPathComponent("renamed"))
         try fm.removeItem(at: deleted)
 
@@ -385,7 +397,8 @@ enum Checks {
         precondition(reopened.active.title == "Comparison")
         let restoredModel = reopened.active.model
         precondition(restoredModel.panes.count == 4 && restoredModel.activeID == restoredModel.panes[0].id)
-        precondition(restoredModel.linked && restoredModel.fileFilter == .jpeg)
+        precondition(restoredModel.linked && restoredModel.stacked && restoredModel.fileFilter == .jpeg)
+        precondition(!reopened.tabs[0].model.stacked)
         precondition(restoredModel.active.folder?.path == folder.path && restoredModel.active.current?.path == selected.path,
                      "Restored folder=\(restoredModel.active.folder?.path ?? "nil"), file=\(restoredModel.active.current?.path ?? "nil")")
         precondition(restoredModel.panes.dropFirst().allSatisfy { $0.folder == nil && $0.error == nil && $0.files.isEmpty })
@@ -402,7 +415,8 @@ enum Checks {
         precondition(defaults.data(forKey: TabsModel.sessionKey) == nil)
         precondition(missingImage.tabs.count == 1 && missingImage.active.number == 1)
         precondition(missingImage.active.model.panes.count == 1 && missingImage.active.model.active.folder == nil)
-        precondition(!missingImage.active.model.linked && missingImage.active.model.fileFilter == .all)
+        precondition(!missingImage.active.model.linked && !missingImage.active.model.stacked
+                     && missingImage.active.model.fileFilter == .all)
         missingImage.close()
         let fresh = TabsModel(defaults: defaults)
         precondition(fresh.tabs.count == 1 && fresh.active.model.panes.count == 1 && fresh.active.model.active.folder == nil)

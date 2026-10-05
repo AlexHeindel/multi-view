@@ -6,8 +6,8 @@ Multi-view is a native macOS app for comparing images and plots from several fol
 
 ## Features
 
-- Open up to eight tabs, each with one to four resizable panes. Every tab keeps its own folders, file filter, selected pane, and linked navigation setting.
-- Reopen the app to restore tabs, names, folders, selected files, filters, and linked navigation. Missing or inaccessible folders reopen as blank panes. **Clear All** in the top toolbar asks for confirmation before clearing the saved session and returning to one blank tab and pane.
+- Open up to eight tabs, each with one to four resizable panes. Every tab keeps its own folders, file filter, selected pane, layout orientation, and linked navigation setting.
+- Reopen the app to restore tabs, names, folders, selected files, filters, pane orientation, and linked navigation. Missing or inaccessible folders reopen as blank panes. **Clear All** in the top toolbar asks for confirmation before clearing the saved session and returning to one blank tab and pane.
 - Browse a different folder in each pane. Use arrows or the keyboard to move through files, or link navigation to advance populated panes together while preserving their offsets.
 - View PNG, JPEG (`.jpg` and `.jpeg`), TIFF (`.tif` and `.tiff`), GIF, SVG, and PDF files. GIFs animate, SVGs stay sharp when zoomed, and multipage PDFs have page controls.
 - Filter every pane in a tab by file type or show all supported files. Choose a specific file with the macOS file picker, or drop a folder onto a pane.
@@ -35,7 +35,7 @@ The build script compiles for the current Mac's architecture and ad-hoc signs `b
 
 ## Use
 
-Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Drag tabs to reorder them, or double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved. The tab strip scrolls horizontally when all tabs do not fit. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
+Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Use **Stack Panes** in the toolbar to arrange panes top to bottom for wide images. Drag tabs to reorder them, or double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved. The tab strip scrolls horizontally when all tabs do not fit. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
 
 Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. **Link Navigation** moves populated panes together and stops when any pane reaches the start or end of its folder.
 

@@ -157,7 +157,11 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if model.panes.count == 4 {
+            if model.stacked && model.panes.count > 1 {
+                VSplitView {
+                    ForEach(model.panes) { PaneView(pane: $0, model: model) }
+                }
+            } else if model.panes.count == 4 {
                 VSplitView {
                     HSplitView { pane(0); pane(1) }
                     HSplitView { pane(2); pane(3) }
@@ -170,9 +174,10 @@ struct ContentView: View {
                 pane(0)
             }
         }
-        .id("\(model.panes.count)-\(splitVersion)")
+        .id("\(model.panes.count)-\(model.stacked)-\(splitVersion)")
         .padding(4)
-        .frame(minWidth: CGFloat(model.panes.count == 3 ? 900 : model.panes.count > 1 ? 680 : 420), minHeight: 440)
+        .frame(minWidth: CGFloat(model.stacked ? 420 : model.panes.count == 3 ? 900 : model.panes.count > 1 ? 680 : 420),
+               minHeight: 440)
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
@@ -182,6 +187,10 @@ struct ContentView: View {
                     .disabled(model.panes.count == 4).help("Add a pane (⌘T)")
                 Button { model.removePane() } label: { Label("Remove Pane", systemImage: "minus.square") }
                     .disabled(model.panes.count == 1).help("Remove an empty pane first, or the selected pane")
+                Toggle(isOn: $model.stacked) { Label("Stack Panes", systemImage: "rectangle.split.1x2") }
+                    .toggleStyle(.button)
+                    .disabled(model.panes.count == 1)
+                    .help("Stack panes top to bottom for wide images")
                 Picker("File Type", selection: $model.fileFilter) {
                     ForEach(FileFilter.allCases, id: \.self) { filter in
                         Text(filter.rawValue).tag(filter)
