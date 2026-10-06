@@ -218,6 +218,9 @@ struct TabbedContentView: View {
     @State private var editingID: UUID?
     @State private var draftName = ""
     @State private var confirmingClearAll = false
+    @State private var windowWidth: CGFloat = 1100
+    @State private var tabContentWidth: CGFloat = 0
+    @State private var scrollIndex = 0
     @FocusState private var nameFocused: Bool
 
     private func beginRename(_ tab: ViewerTab) {
@@ -232,9 +235,28 @@ struct TabbedContentView: View {
         nameFocused = false
     }
 
+    private func revealActiveTab(in scroll: ScrollViewProxy) {
+        let last = tabs.activeID == tabs.tabs.last?.id
+        scrollIndex = last ? tabs.tabs.count : tabs.tabs.firstIndex(where: { $0.id == tabs.activeID }) ?? 0
+        scroll.scrollTo(last ? AnyHashable("plus") : AnyHashable(tabs.activeID), anchor: .trailing)
+    }
+
+    private func scrollTabs(_ direction: Int, in scroll: ScrollViewProxy) {
+        scrollIndex = min(max(scrollIndex + direction, 0), tabs.tabs.count)
+        let target: AnyHashable = scrollIndex == tabs.tabs.count ? AnyHashable("plus") : AnyHashable(tabs.tabs[scrollIndex].id)
+        withAnimation { scroll.scrollTo(target, anchor: direction < 0 ? .leading : .trailing) }
+    }
+
     var body: some View {
         ContentView(model: tabs.active.model)
             .id(tabs.activeID)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear
+                        .onAppear { windowWidth = geometry.size.width }
+                        .onChange(of: geometry.size.width) { _, width in windowWidth = width }
+                }
+            }
             .onChange(of: nameFocused) { _, focused in
                 if !focused { finishRename() }
             }
@@ -255,73 +277,151 @@ struct TabbedContentView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     ScrollViewReader { scroll in
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 4) {
-                                ForEach(tabs.tabs) { tab in
-                                    HStack(spacing: 6) {
-                                        if editingID == tab.id {
-                                            TextField("Name", text: $draftName)
-                                                .textFieldStyle(.roundedBorder)
-                                                .frame(width: 120)
-                                                .focused($nameFocused)
-                                                .onAppear { nameFocused = true }
-                                                .onSubmit { finishRename() }
-                                                .onExitCommand {
-                                                    editingID = nil
-                                                    nameFocused = false
+                        let availableWidth = max(280, windowWidth - 820)
+                        let overflowing = tabContentWidth > availableWidth
+                        HStack(spacing: 0) {
+                            if overflowing {
+                                Button { scrollTabs(-1, in: scroll) } label: { Image(systemName: "chevron.left") }
+                                    .disabled(scrollIndex == 0)
+                                    .help("Scroll tabs left")
+                                    .accessibilityLabel("Scroll tabs left")
+                                    .frame(width: 22, height: 36)
+                            }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 4) {
+                                    ForEach(tabs.tabs) { tab in
+                                        HStack(spacing: 6) {
+                                            if editingID == tab.id {
+                                                TextField("Name", text: $draftName)
+                                                    .textFieldStyle(.roundedBorder)
+                                                    .frame(width: 120)
+                                                    .focused($nameFocused)
+                                                    .onAppear { nameFocused = true }
+                                                    .onSubmit { finishRename() }
+                                                    .onExitCommand {
+                                                        editingID = nil
+                                                        nameFocused = false
+                                                    }
+                                            } else {
+                                                Button { tabs.activeID = tab.id } label: {
+                                                    Text(tab.title).lineLimit(1).frame(maxWidth: 160)
                                                 }
-                                        } else {
-                                            Button { tabs.activeID = tab.id } label: {
-                                                Text(tab.title).lineLimit(1).frame(maxWidth: 160)
+                                                .accessibilityLabel(tab.title)
+                                                .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(tab) })
                                             }
-                                            .accessibilityLabel(tab.title)
-                                            .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(tab) })
+                                            if tabs.tabs.count > 1 {
+                                                Button { tabs.closeTab(tab.id) } label: {
+                                                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                                                }
+                                                .accessibilityLabel("Close tab \(tab.number)")
+                                            }
                                         }
-                                        if tabs.tabs.count > 1 {
-                                            Button { tabs.closeTab(tab.id) } label: {
-                                                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
-                                            }
-                                            .accessibilityLabel("Close tab \(tab.number)")
+                                        .font(.system(size: 12, weight: tabs.activeID == tab.id ? .semibold : .regular))
+                                        .foregroundStyle(tabs.activeID == tab.id ? Color.primary : Color.secondary)
+                                        .padding(.horizontal, 12).padding(.vertical, 6)
+                                        .background(tabs.activeID == tab.id ? Color.accentColor.opacity(0.16) : Color.clear,
+                                                    in: RoundedRectangle(cornerRadius: 7))
+                                        .fixedSize()
+                                        .id(tab.id)
+                                        .help("Double-click the tab name to rename; drag to reorder")
+                                        .draggable(tab.id.uuidString)
+                                        .dropDestination(for: String.self) { items, _ in
+                                            guard let source = items.first.flatMap(UUID.init(uuidString:)) else { return false }
+                                            return tabs.moveTab(source, to: tab.id)
                                         }
                                     }
-                                    .font(.system(size: 12, weight: tabs.activeID == tab.id ? .semibold : .regular))
-                                    .foregroundStyle(tabs.activeID == tab.id ? Color.primary : Color.secondary)
-                                    .padding(.horizontal, 12).padding(.vertical, 6)
-                                    .background(tabs.activeID == tab.id ? Color.accentColor.opacity(0.16) : Color.clear,
-                                                in: RoundedRectangle(cornerRadius: 7))
-                                    .fixedSize()
-                                    .id(tab.id)
-                                    .help("Double-click the tab name to rename; drag to reorder")
-                                    .draggable(tab.id.uuidString)
-                                    .dropDestination(for: String.self) { items, _ in
-                                        guard let source = items.first.flatMap(UUID.init(uuidString:)) else { return false }
-                                        return tabs.moveTab(source, to: tab.id)
+                                    Button { tabs.addTab() } label: { Image(systemName: "plus") }
+                                        .disabled(tabs.tabs.count == 8)
+                                        .help("New tab (⌘N)")
+                                        .accessibilityLabel("New tab")
+                                        .padding(.horizontal, 8)
+                                        .id("plus")
+                                }
+                                .fixedSize()
+                                .padding(.horizontal, 8)
+                                .background {
+                                    GeometryReader { geometry in
+                                        Color.clear
+                                            .onAppear { tabContentWidth = geometry.size.width }
+                                            .onChange(of: geometry.size.width) { _, width in tabContentWidth = width }
                                     }
                                 }
-                                Button { tabs.addTab() } label: { Image(systemName: "plus") }
-                                    .disabled(tabs.tabs.count == 8)
-                                    .help("New tab (⌘N)")
-                                    .accessibilityLabel("New tab")
-                                    .padding(.horizontal, 8)
-                                    .id("plus")
+                                .background(TabWheelScrollView { progress in
+                                    let index = Int((progress * CGFloat(tabs.tabs.count)).rounded())
+                                    if index != scrollIndex { scrollIndex = index }
+                                })
                             }
-                            .fixedSize()
-                            .padding(.horizontal, 8)
+                            .frame(width: min(max(40, tabContentWidth), availableWidth - (overflowing ? 44 : 0)), height: 36)
+                            if overflowing {
+                                Button { scrollTabs(1, in: scroll) } label: { Image(systemName: "chevron.right") }
+                                    .disabled(scrollIndex == tabs.tabs.count)
+                                    .help("Scroll tabs right")
+                                    .accessibilityLabel("Scroll tabs right")
+                                    .frame(width: 22, height: 36)
+                            }
                         }
-                        .scrollIndicators(.hidden)
-                        .frame(width: min(CGFloat(tabs.tabs.count) * 90 + 40 + (editingID == nil ? 0 : 80), 450),
-                               height: 36)
-                        .onChange(of: tabs.activeID) { _, id in
-                            withAnimation {
-                                scroll.scrollTo(id == tabs.tabs.last?.id ? AnyHashable("plus") : AnyHashable(id),
-                                                anchor: .trailing)
-                            }
+                        .onAppear { revealActiveTab(in: scroll) }
+                        .onChange(of: windowWidth) { _, _ in revealActiveTab(in: scroll) }
+                        .onChange(of: tabs.tabs.map(\.id)) { _, _ in revealActiveTab(in: scroll) }
+                        .onChange(of: tabs.activeID) { _, _ in
+                            withAnimation { revealActiveTab(in: scroll) }
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
     }
+}
+
+private struct TabWheelScrollView: NSViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+
+    final class View: NSView {
+        private var wheelMonitor: Any?
+        var onScroll: (CGFloat) -> Void = { _ in }
+
+        private func reportPosition() {
+            guard let scrollView = enclosingScrollView, let document = scrollView.documentView else { return }
+            let distance = max(0, document.frame.width - scrollView.contentView.bounds.width)
+            onScroll(distance == 0 ? 0 : scrollView.contentView.bounds.minX / distance)
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
+            wheelMonitor = nil
+            guard window != nil else { return }
+            wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self, event.window === self.window,
+                      let scrollView = self.enclosingScrollView,
+                      let document = scrollView.documentView else { return event }
+                let clip = scrollView.contentView
+                guard clip.bounds.contains(clip.convert(event.locationInWindow, from: nil)),
+                      document.frame.width > clip.bounds.width else { return event }
+                if abs(event.scrollingDeltaX) >= 0.5 {
+                    DispatchQueue.main.async { [weak self] in self?.reportPosition() }
+                    return event
+                }
+                guard event.scrollingDeltaY != 0 else { return event }
+                let step = event.hasPreciseScrollingDeltas ? 1.0 : 40.0
+                let x = min(max(clip.bounds.minX - event.scrollingDeltaY * step, 0),
+                            document.frame.width - clip.bounds.width)
+                clip.scroll(to: NSPoint(x: x, y: clip.bounds.minY))
+                scrollView.reflectScrolledClipView(clip)
+                self.reportPosition()
+                return nil
+            }
+        }
+
+        deinit { if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) } }
+    }
+
+    func makeNSView(context: Context) -> View {
+        let view = View()
+        view.onScroll = onScroll
+        return view
+    }
+    func updateNSView(_ view: View, context: Context) { view.onScroll = onScroll }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
