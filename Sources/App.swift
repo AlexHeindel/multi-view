@@ -5,65 +5,68 @@ import UniformTypeIdentifiers
 struct PaneView: View {
     @ObservedObject var pane: Pane
     @ObservedObject var model: WindowModel
+    let showInfoBars: Bool
     @State private var dropTarget = false
     private var selected: Bool { model.activeID == pane.id }
     private func activate() { model.activeID = pane.id }
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder").foregroundStyle(selected ? Color.accentColor : .secondary)
-                    Text(pane.folder?.lastPathComponent ?? "Choose a folder")
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                        .help(pane.folder?.path ?? "Open or drop a folder of plots")
-                    Spacer(minLength: 0)
-                    Button { model.chooseFolder(for: pane) } label: { Image(systemName: "folder.badge.plus") }
-                        .help("Change this pane’s folder").accessibilityLabel("Change folder")
-                }
-                HStack(spacing: 5) {
-                    Button { model.move(-1, from: pane) } label: { Image(systemName: "chevron.left") }
-                        .font(.system(size: 18, weight: .bold)).frame(width: 30, height: 28)
-                        .disabled(!model.canMove(-1, from: pane)).help("Previous file (←)").accessibilityLabel("Previous file")
-                    Button { model.move(1, from: pane) } label: { Image(systemName: "chevron.right") }
-                        .font(.system(size: 18, weight: .bold)).frame(width: 30, height: 28)
-                        .disabled(!model.canMove(1, from: pane)).help("Next file (→)").accessibilityLabel("Next file")
-                    Button { model.chooseImage(for: pane) } label: {
-                        HStack(spacing: 3) {
-                            Text(pane.current?.lastPathComponent ?? "Choose Image…")
-                                .lineLimit(1).truncationMode(.middle)
-                            Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+            if showInfoBars {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "folder").foregroundStyle(selected ? Color.accentColor : .secondary)
+                        Text(pane.folder?.lastPathComponent ?? "Choose a folder")
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1).truncationMode(.middle)
+                            .help(pane.folder?.path ?? "Open or drop a folder of plots")
+                        Spacer(minLength: 0)
+                        Button { model.chooseFolder(for: pane) } label: { Image(systemName: "folder.badge.plus") }
+                            .help("Change this pane’s folder").accessibilityLabel("Change folder")
+                    }
+                    HStack(spacing: 5) {
+                        Button { model.move(-1, from: pane) } label: { Image(systemName: "chevron.left") }
+                            .font(.system(size: 18, weight: .bold)).frame(width: 30, height: 28)
+                            .disabled(!model.canMove(-1, from: pane)).help("Previous file (←)").accessibilityLabel("Previous file")
+                        Button { model.move(1, from: pane) } label: { Image(systemName: "chevron.right") }
+                            .font(.system(size: 18, weight: .bold)).frame(width: 30, height: 28)
+                            .disabled(!model.canMove(1, from: pane)).help("Next file (→)").accessibilityLabel("Next file")
+                        Button { model.chooseImage(for: pane) } label: {
+                            HStack(spacing: 3) {
+                                Text(pane.current?.lastPathComponent ?? "Choose Image…")
+                                    .lineLimit(1).truncationMode(.middle)
+                                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                            }
                         }
-                    }
-                        .font(.system(size: 12))
-                        .help("Choose an image from a folder")
-                        .accessibilityLabel("Choose image")
-                    Spacer(minLength: 0)
-                    Text(pane.files.isEmpty ? "0 / 0" : "\(pane.index + 1) / \(pane.files.count)")
-                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
-                        .fixedSize()
-                    if let pdf = pane.pdf, pdf.pageCount > 1 {
-                        Button { activate(); pane.pdfPage -= 1 } label: { Image(systemName: "chevron.up") }
-                            .disabled(pane.pdfPage == 0).help("Previous PDF page").accessibilityLabel("Previous PDF page")
-                        Text("\(pane.pdfPage + 1)/\(pdf.pageCount)")
+                            .font(.system(size: 12))
+                            .help("Choose an image from a folder")
+                            .accessibilityLabel("Choose image")
+                        Spacer(minLength: 0)
+                        Text(pane.files.isEmpty ? "0 / 0" : "\(pane.index + 1) / \(pane.files.count)")
                             .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
-                        Button { activate(); pane.pdfPage += 1 } label: { Image(systemName: "chevron.down") }
-                            .disabled(pane.pdfPage + 1 >= pdf.pageCount).help("Next PDF page").accessibilityLabel("Next PDF page")
+                            .fixedSize()
+                        if let pdf = pane.pdf, pdf.pageCount > 1 {
+                            Button { activate(); pane.pdfPage -= 1 } label: { Image(systemName: "chevron.up") }
+                                .disabled(pane.pdfPage == 0).help("Previous PDF page").accessibilityLabel("Previous PDF page")
+                            Text("\(pane.pdfPage + 1)/\(pdf.pageCount)")
+                                .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                            Button { activate(); pane.pdfPage += 1 } label: { Image(systemName: "chevron.down") }
+                                .disabled(pane.pdfPage + 1 >= pdf.pageCount).help("Next PDF page").accessibilityLabel("Next PDF page")
+                        }
+                        Button("Fit") { activate(); pane.view(.fit) }.help("Fit to pane (⌘0)")
+                            .disabled(pane.raster == nil && pane.nativeImage == nil && pane.pdf == nil)
+                        Button(pane.pdf == nil ? "1:1" : "100%") { activate(); pane.view(.actualSize) }
+                            .help(pane.pdf == nil ? "One image pixel per screen pixel (⌘1)" : "PDF at 100% (⌘1)")
+                            .accessibilityLabel("Actual Size")
+                            .disabled(pane.raster == nil && pane.nativeImage == nil && pane.pdf == nil)
                     }
-                    Button("Fit") { activate(); pane.view(.fit) }.help("Fit to pane (⌘0)")
-                        .disabled(pane.raster == nil && pane.nativeImage == nil && pane.pdf == nil)
-                    Button(pane.pdf == nil ? "1:1" : "100%") { activate(); pane.view(.actualSize) }
-                        .help(pane.pdf == nil ? "One image pixel per screen pixel (⌘1)" : "PDF at 100% (⌘1)")
-                        .accessibilityLabel("Actual Size")
-                        .disabled(pane.raster == nil && pane.nativeImage == nil && pane.pdf == nil)
+                    .buttonStyle(.borderless).controlSize(.small)
+                    .labelStyle(.iconOnly)
                 }
-                .buttonStyle(.borderless).controlSize(.small)
-                .labelStyle(.iconOnly)
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(.bar)
+                Divider()
             }
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(.bar)
-            Divider()
             ZStack {
                 Color(nsColor: .underPageBackgroundColor)
                 if pane.indexing {
@@ -153,13 +156,14 @@ private struct WideDividerAnchor: NSViewRepresentable {
 
 struct ContentView: View {
     @ObservedObject var model: WindowModel
+    @AppStorage("showInfoBars") private var showInfoBars = true
     @State private var splitVersion = 0
 
     var body: some View {
         Group {
             if model.stacked && model.panes.count > 1 {
                 VSplitView {
-                    ForEach(model.panes) { PaneView(pane: $0, model: model) }
+                    ForEach(model.panes) { PaneView(pane: $0, model: model, showInfoBars: showInfoBars) }
                 }
             } else if model.panes.count == 4 {
                 VSplitView {
@@ -168,7 +172,7 @@ struct ContentView: View {
                 }
             } else if model.panes.count > 1 {
                 HSplitView {
-                    ForEach(model.panes) { PaneView(pane: $0, model: model) }
+                    ForEach(model.panes) { PaneView(pane: $0, model: model, showInfoBars: showInfoBars) }
                 }
             } else {
                 pane(0)
@@ -191,6 +195,9 @@ struct ContentView: View {
                     .toggleStyle(.button)
                     .disabled(model.panes.count == 1)
                     .help("Stack panes top to bottom for wide images")
+                Toggle(isOn: $showInfoBars) { Label("Pane Info Bars", systemImage: "info.circle") }
+                    .toggleStyle(.button)
+                    .help(showInfoBars ? "Hide info bars in all panes to give images more room" : "Show info bars in all panes")
                 Picker("File Type", selection: $model.fileFilter) {
                     ForEach(FileFilter.allCases, id: \.self) { filter in
                         Text(filter.rawValue).tag(filter)
@@ -210,7 +217,9 @@ struct ContentView: View {
         }
     }
 
-    private func pane(_ index: Int) -> some View { PaneView(pane: model.panes[index], model: model) }
+    private func pane(_ index: Int) -> some View {
+        PaneView(pane: model.panes[index], model: model, showInfoBars: showInfoBars)
+    }
 }
 
 struct TabbedContentView: View {
@@ -277,7 +286,7 @@ struct TabbedContentView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     ScrollViewReader { scroll in
-                        let availableWidth = max(280, windowWidth - 820)
+                        let availableWidth = max(280, windowWidth - 860)
                         let overflowing = tabContentWidth > availableWidth
                         HStack(spacing: 0) {
                             if overflowing {

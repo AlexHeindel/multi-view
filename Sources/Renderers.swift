@@ -11,6 +11,8 @@ private func wheelZoomFactor(_ event: NSEvent) -> CGFloat {
 
 final class CenteredClipView: NSClipView {
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        // Manual pan/zoom must keep its anchor even when the image is smaller than the pane.
+        if let scroll = enclosingScrollView as? ImageScrollView, !scroll.fitting { return proposedBounds }
         var result = super.constrainBoundsRect(proposedBounds)
         if let documentView {
             if documentView.frame.width < result.width {
@@ -67,13 +69,7 @@ final class ImageCanvas: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let scroll = enclosingScrollView else { return }
-        let clip = scroll.contentView
-        var origin = clip.bounds.origin
-        origin.x -= event.deltaX / scroll.magnification
-        origin.y += event.deltaY / scroll.magnification
-        clip.scroll(to: origin)
-        scroll.reflectScrolledClipView(clip)
+        (enclosingScrollView as? ImageScrollView)?.pan(by: NSPoint(x: event.deltaX, y: event.deltaY))
     }
 
     override func mouseUp(with event: NSEvent) { NSCursor.pop() }
@@ -144,10 +140,8 @@ final class ImageScrollView: NSScrollView {
     }
 
     func actualSize() {
-        fitting = false
         let scale = 1 / (window?.backingScaleFactor ?? 2)
-        setMagnification(scale, centeredAt: NSPoint(x: canvas.bounds.midX, y: canvas.bounds.midY))
-        checkDetail()
+        zoom(by: scale / magnification)
     }
 
     override func layout() {
@@ -162,22 +156,31 @@ final class ImageScrollView: NSScrollView {
 
     override func magnify(with event: NSEvent) {
         canvas.activate?()
-        fitting = false
-        super.magnify(with: event)
-        checkDetail()
+        zoom(by: 1 + event.magnification)
     }
 
     override func scrollWheel(with event: NSEvent) {
         canvas.activate?()
-        guard event.scrollingDeltaY != 0 else {
-            super.scrollWheel(with: event)
-            return
+        // Native elastic scrolling cannot constrain our freely panned clip view.
+        if abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+            pan(by: NSPoint(x: event.scrollingDeltaX, y: 0))
+        } else if event.scrollingDeltaY != 0 {
+            zoom(by: wheelZoomFactor(event))
         }
-        wheelZoom(by: wheelZoomFactor(event), centeredAt: canvas.convert(event.locationInWindow, from: nil))
     }
 
-    private func wheelZoom(by factor: CGFloat, centeredAt point: NSPoint) {
+    func pan(by delta: NSPoint) {
         fitting = false
+        let origin = contentView.bounds.origin
+        contentView.scroll(to: NSPoint(x: origin.x - delta.x / magnification,
+                                      y: origin.y + delta.y / magnification))
+        reflectScrolledClipView(contentView)
+    }
+
+    private func zoom(by factor: CGFloat) {
+        fitting = false
+        let point = canvas.convert(NSPoint(x: contentView.bounds.midX, y: contentView.bounds.midY),
+                                   from: contentView)
         setMagnification(max(minMagnification, min(maxMagnification, magnification * factor)),
                          centeredAt: point)
         checkDetail()

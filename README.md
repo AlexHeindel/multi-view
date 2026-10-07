@@ -39,6 +39,8 @@ Choose **Open Folder** in a pane to load images. Click the **+** beside the righ
 
 Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. **Link Navigation** moves populated panes together and stops when any pane reaches the start or end of its folder.
 
+Toggle **Pane Info Bars** (the info-circle button in the top toolbar) to hide the folder and file controls in every pane and give fitted images the full pane height. This setting applies across tabs and is remembered when you reopen the app. Keyboard navigation, zoom, pan, and the toolbar remain available while the bars are hidden. Zoom keeps the current panned viewport center steady.
+
 Your tabs and selected files are remembered when you close the app. To start over, click **Clear All** in the top toolbar, then confirm with **Clear All** in the pop-up. This clears every tab and pane and the saved session, leaving one blank tab with one pane. Your source files and folders are kept. Choose **Cancel** to keep the current session.
 
 | Action | Shortcut or gesture |

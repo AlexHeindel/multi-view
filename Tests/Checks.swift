@@ -2,6 +2,23 @@ import AppKit
 import ImageIO
 import PDFKit
 import CoreText
+import SwiftUI
+
+private final class PinchEvent: NSEvent {
+    var amount: CGFloat = 0.08
+    weak var targetWindow: NSWindow?
+    override var magnification: CGFloat { amount }
+    override var type: NSEvent.EventType { .magnify }
+    override var phase: NSEvent.Phase { .changed }
+    override var window: NSWindow? { targetWindow }
+    override var windowNumber: Int { targetWindow?.windowNumber ?? 0 }
+    override var locationInWindow: NSPoint { NSPoint(x: 300, y: 200) }
+}
+
+private final class PanEvent: NSEvent {
+    override var deltaX: CGFloat { 100 }
+    override var deltaY: CGFloat { 80 }
+}
 
 @main
 enum Checks {
@@ -186,8 +203,8 @@ enum Checks {
         zoomWindow.contentView = scroll
         zoomWindow.makeKeyAndOrderFront(nil)
         let windowScale = scroll.magnification
-        func imageWindowScroll(_ delta: Int32) {
-            let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+        func imageWindowScroll(_ delta: Int32, units: CGScrollEventUnit = .pixel) {
+            let cg = CGEvent(scrollWheelEvent2Source: nil, units: units,
                              wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)!
             cg.location = zoomWindow.convertPoint(toScreen: NSPoint(x: 300, y: 200))
             zoomWindow.sendEvent(NSEvent(cgEvent: cg)!)
@@ -197,6 +214,110 @@ enum Checks {
                      "Precise scroll must zoom one step through the window")
         imageWindowScroll(-10)
         precondition(abs(scroll.magnification - windowScale) < 0.001)
+        scroll.fitting = false
+        scroll.setMagnification(1, centeredAt: NSPoint(x: 820, y: 546))
+        scroll.contentView.scroll(to: NSPoint(x: 900, y: 600))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        let pannedCenter = NSPoint(x: scroll.contentView.bounds.midX, y: scroll.contentView.bounds.midY)
+        for (up, down) in [(wheelUp, wheelDown), (preciseUp, preciseDown)] {
+            // Zoom with the pointer away from center after panning toward an image edge.
+            scroll.scrollWheel(with: up)
+            precondition(abs(scroll.contentView.bounds.midX - pannedCenter.x) < 1
+                         && abs(scroll.contentView.bounds.midY - pannedCenter.y) < 1,
+                         "Zoom must preserve the panned viewport center")
+            scroll.scrollWheel(with: down)
+            precondition(abs(scroll.contentView.bounds.midX - pannedCenter.x) < 1
+                         && abs(scroll.contentView.bounds.midY - pannedCenter.y) < 1)
+        }
+        let pannedScale = scroll.magnification
+        scroll.magnify(with: PinchEvent())
+        precondition(abs(scroll.magnification / pannedScale - 1.08) < 0.001)
+        precondition(abs(scroll.contentView.bounds.midX - pannedCenter.x) < 1
+                     && abs(scroll.contentView.bounds.midY - pannedCenter.y) < 1,
+                     "Pinch must preserve the panned viewport center")
+        scroll.fit()
+        let fitCenter = NSPoint(x: scroll.contentView.bounds.midX, y: scroll.contentView.bounds.midY)
+        scroll.canvas.mouseDragged(with: PanEvent())
+        let edgeCenter = NSPoint(x: scroll.contentView.bounds.midX, y: scroll.contentView.bounds.midY)
+        precondition(abs(edgeCenter.x - fitCenter.x) > 100 && abs(edgeCenter.y - fitCenter.y) > 100,
+                     "A fitted image must pan freely, including beyond its edges")
+        scroll.needsLayout = true
+        scroll.layoutSubtreeIfNeeded()
+        for _ in 0..<8 {
+            imageWindowScroll(10)
+            precondition(abs(scroll.contentView.bounds.midX - edgeCenter.x) < 1
+                         && abs(scroll.contentView.bounds.midY - edgeCenter.y) < 1,
+                         "Window-dispatched trackpad scroll must preserve an off-center fitted image")
+        }
+        for _ in 0..<8 {
+            imageWindowScroll(-10)
+            precondition(abs(scroll.contentView.bounds.midX - edgeCenter.x) < 1
+                         && abs(scroll.contentView.bounds.midY - edgeCenter.y) < 1,
+                         "Zooming out past image edges must not snap back to center")
+        }
+        for units: CGScrollEventUnit in [.line, .pixel] {
+            for delta: Int32 in [1, -1, 3, -3] {
+                imageWindowScroll(delta, units: units)
+                precondition(abs(scroll.contentView.bounds.midX - edgeCenter.x) < 1
+                             && abs(scroll.contentView.bounds.midY - edgeCenter.y) < 1,
+                             "Mouse and trackpad scrolling must preserve the edge anchor in both directions")
+            }
+        }
+        for amount: CGFloat in [0.08, -0.08, 0.3, -0.3] {
+            let event = PinchEvent()
+            event.amount = amount
+            event.targetWindow = zoomWindow
+            let scale = scroll.magnification
+            let point = scroll.convert(event.locationInWindow, from: nil)
+            let target = scroll.hitTest(point)!
+            target.magnify(with: event)
+            precondition(abs(scroll.magnification / scale - (1 + amount)) < 0.001,
+                         "Hit-tested pinch must reach the zoom handler: before=\(scale), after=\(scroll.magnification), delta=\(amount)")
+            precondition(abs(scroll.contentView.bounds.midX - edgeCenter.x) < 1
+                         && abs(scroll.contentView.bounds.midY - edgeCenter.y) < 1,
+                         "Trackpad pinch must preserve the edge anchor in both directions")
+        }
+        scroll.actualSize()
+        precondition(abs(scroll.contentView.bounds.midX - edgeCenter.x) < 1
+                     && abs(scroll.contentView.bounds.midY - edgeCenter.y) < 1,
+                     "Actual-size zoom must preserve the panned center")
+        for direction: Int32 in [-1, 1] {
+            let scale = scroll.magnification
+            let before = scroll.contentView.bounds.origin
+            for phase: CGScrollPhase in [.began, .changed, .ended] {
+                let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                 wheelCount: 2, wheel1: 0, wheel2: phase == .ended ? 0 : direction * 20,
+                                 wheel3: 0)!
+                cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+                cg.location = zoomWindow.convertPoint(toScreen: NSPoint(x: 300, y: 200))
+                let event = NSEvent(cgEvent: cg)!
+                zoomWindow.sendEvent(event)
+                // The reported crash occurs on a display-link tick after the scroll event.
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            }
+            precondition(abs(scroll.contentView.bounds.minX - (before.x - CGFloat(direction * 40) / scale)) < 1,
+                         "Horizontal trackpad scroll must pan directly without native elastic scrolling")
+            for phase: CGMomentumScrollPhase in [.begin, .continuous, .end] {
+                let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                 wheelCount: 2, wheel1: 0, wheel2: phase == .end ? 0 : direction * 10,
+                                 wheel3: 0)!
+                cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(phase.rawValue))
+                cg.location = zoomWindow.convertPoint(toScreen: NSPoint(x: 300, y: 200))
+                let event = NSEvent(cgEvent: cg)!
+                zoomWindow.sendEvent(event)
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            }
+            precondition(scroll.contentView.bounds.minX.isFinite && scroll.contentView.bounds.minY.isFinite)
+            precondition(abs(scroll.magnification - scale) < 0.001, "Horizontal scroll must pan without zooming")
+            precondition((scroll.contentView.bounds.minX - before.x) * CGFloat(direction) < 0,
+                         "Momentum must retain the pan direction")
+        }
+        let diagonalScale = scroll.magnification
+        let diagonal = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                               wheelCount: 2, wheel1: 1, wheel2: 10, wheel3: 0)!)!
+        scroll.scrollWheel(with: diagonal)
+        precondition(abs(scroll.magnification - diagonalScale) < 0.001,
+                     "Mostly horizontal gestures must pan without accidental zoom")
         zoomWindow.orderOut(nil)
         scroll.fit()
         precondition(scroll.fitting && abs(scroll.magnification - fittedScale) < 0.001)
@@ -388,8 +509,46 @@ enum Checks {
         precondition(filtered.panes.allSatisfy { $0.files.count == 6 })
         filtered.panes.forEach { $0.close() }
         try checkSession(folder: paired, image: jpeg)
-        print("PASS: session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, zoom, and multipage PDF.")
+        checkInfoBars(raster: full)
+        print("PASS: session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, panned zoom, info-bar layout, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
+    }
+
+    static func checkInfoBars(raster: Raster) {
+        let suite = "local.multiview.layout.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = WindowModel()
+        model.addPane(); model.addPane()
+        model.stacked = true
+        model.panes.forEach { $0.raster = raster }
+        let host = NSHostingView(rootView: ContentView(model: model).defaultAppStorage(defaults))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 800),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); model.close() }
+        func images(in view: NSView) -> [ImageScrollView] {
+            if let image = view as? ImageScrollView { return [image] }
+            return view.subviews.flatMap { images(in: $0) }
+        }
+        wait("three fitted panes") { images(in: host).count == 3 && images(in: host).allSatisfy { $0.magnification > 0.01 } }
+        let views = images(in: host)
+        let heights = views.map { $0.frame.height }
+        let scales = views.map { $0.magnification }
+        defaults.set(false, forKey: "showInfoBars")
+        wait("hidden info bars reclaim height in every pane") {
+            zip(views, heights).allSatisfy { $0.frame.height > $1 + 40 }
+                && zip(views, scales).allSatisfy { $0.magnification > $1 }
+        }
+        precondition(images(in: host).count == 3 && zip(images(in: host), views).allSatisfy { $0 === $1 },
+                     "Toggling info bars must retain each image view")
+        views[0].actualSize()
+        let zoomedScale = views[0].magnification
+        defaults.set(true, forKey: "showInfoBars")
+        wait("restored info bars") { zip(views, heights).allSatisfy { abs($0.frame.height - $1) < 1 } }
+        precondition(abs(views[0].magnification - zoomedScale) < 0.001,
+                     "Showing info bars must retain manual zoom")
     }
 
     static func checkSession(folder: URL, image: URL) throws {
