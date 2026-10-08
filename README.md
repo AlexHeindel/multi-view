@@ -41,6 +41,8 @@ Use the **File Type** menu to show one format or **All**. Changing the filter ke
 
 Toggle **Pane Info Bars** (the info-circle button in the top toolbar) to hide the folder and file controls in every pane and give fitted images the full pane height. This setting applies across tabs and is remembered when you reopen the app. Keyboard navigation, zoom, pan, and the toolbar remain available while the bars are hidden. Zoom keeps the current panned viewport center steady.
 
+The app follows your system appearance by default. Click the sun or moon in the top toolbar to switch between light and dark mode; your choice is remembered across tabs and app launches. Choose **Compare → Use System Appearance** to follow macOS again. The pane layout button shows whether panes are arranged horizontally or vertically.
+
 Your tabs and selected files are remembered when you close the app. To start over, click **Clear All** in the top toolbar, then confirm with **Clear All** in the pop-up. This clears every tab and pane and the saved session, leaving one blank tab with one pane. Your source files and folders are kept. Choose **Cancel** to keep the current session.
 
 | Action | Shortcut or gesture |

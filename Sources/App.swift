@@ -156,6 +156,8 @@ private struct WideDividerAnchor: NSViewRepresentable {
 
 struct ContentView: View {
     @ObservedObject var model: WindowModel
+    @Binding var appearance: String
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("showInfoBars") private var showInfoBars = true
     @State private var splitVersion = 0
 
@@ -187,11 +189,13 @@ struct ContentView: View {
             ToolbarItemGroup(placement: .automatic) {
                 Button { model.chooseFolder() } label: { Label("Open Folder", systemImage: "folder") }
                     .help("Open folder in the selected pane (⌘O)")
-                Button { model.addPane() } label: { Label("Add Pane", systemImage: "rectangle.split.2x1") }
+                Button { model.addPane() } label: { Label("Add Pane", systemImage: "plus.square") }
                     .disabled(model.panes.count == 4).help("Add a pane (⌘T)")
                 Button { model.removePane() } label: { Label("Remove Pane", systemImage: "minus.square") }
                     .disabled(model.panes.count == 1).help("Remove an empty pane first, or the selected pane")
-                Toggle(isOn: $model.stacked) { Label("Stack Panes", systemImage: "rectangle.split.1x2") }
+                Toggle(isOn: $model.stacked) {
+                    Label("Stack Panes", systemImage: model.stacked ? "rectangle.split.1x2" : "rectangle.split.2x1")
+                }
                     .toggleStyle(.button)
                     .disabled(model.panes.count == 1)
                     .help("Stack panes top to bottom for wide images")
@@ -208,6 +212,11 @@ struct ContentView: View {
                     .disabled(model.panes.count == 1).help("Return panes to equal sizes")
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { appearance = colorScheme == .dark ? "light" : "dark" } label: {
+                    Label(colorScheme == .dark ? "Dark Mode" : "Light Mode",
+                          systemImage: colorScheme == .dark ? "moon" : "sun.max")
+                }
+                    .help(colorScheme == .dark ? "Switch to light mode" : "Switch to dark mode")
                 Toggle(isOn: $model.linked) { Label("Link Navigation", systemImage: "link") }
                     .toggleStyle(.button)
                     .help("Advance all populated panes together (⌘L). Stops when any pane reaches its boundary.")
@@ -224,6 +233,7 @@ struct ContentView: View {
 
 struct TabbedContentView: View {
     @ObservedObject var tabs: TabsModel
+    @AppStorage("appearance") private var appearance = "system"
     @State private var editingID: UUID?
     @State private var draftName = ""
     @State private var confirmingClearAll = false
@@ -257,7 +267,8 @@ struct TabbedContentView: View {
     }
 
     var body: some View {
-        ContentView(model: tabs.active.model)
+        ContentView(model: tabs.active.model, appearance: $appearance)
+            .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .id(tabs.activeID)
             .background {
                 GeometryReader { geometry in
@@ -281,7 +292,7 @@ struct TabbedContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button { confirmingClearAll = true } label: { Label("Clear All", systemImage: "arrow.counterclockwise") }
+                    Button { confirmingClearAll = true } label: { Label("Clear All", systemImage: "trash") }
                         .help("Clear the saved session and return to one blank tab and pane")
                 }
                 ToolbarItem(placement: .principal) {
@@ -469,6 +480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct MultiViewApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var tabs = TabsModel(defaults: .standard)
+    @AppStorage("appearance") private var appearance = "system"
 
     var body: some Scene {
         Window("Multi-view", id: "viewer") {
@@ -501,6 +513,9 @@ struct MultiViewApp: App {
                     .disabled(tabs.active.model.panes.count == 1)
             }
             CommandMenu("Compare") {
+                Button("Use System Appearance") { appearance = "system" }
+                    .disabled(appearance == "system")
+                Divider()
                 Toggle("Link Navigation", isOn: Binding(
                     get: { tabs.active.model.linked }, set: { tabs.active.model.linked = $0 }
                 )).keyboardShortcut("l")

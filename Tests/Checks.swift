@@ -509,20 +509,21 @@ enum Checks {
         precondition(filtered.panes.allSatisfy { $0.files.count == 6 })
         filtered.panes.forEach { $0.close() }
         try checkSession(folder: paired, image: jpeg)
-        checkInfoBars(raster: full)
-        print("PASS: session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, panned zoom, info-bar layout, and multipage PDF.")
+        checkAppearanceAndInfoBars(raster: full)
+        print("PASS: session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
     }
 
-    static func checkInfoBars(raster: Raster) {
+    static func checkAppearanceAndInfoBars(raster: Raster) {
         let suite = "local.multiview.layout.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let model = WindowModel()
+        let tabs = TabsModel()
+        let model = tabs.active.model
         model.addPane(); model.addPane()
         model.stacked = true
         model.panes.forEach { $0.raster = raster }
-        let host = NSHostingView(rootView: ContentView(model: model).defaultAppStorage(defaults))
+        let host = NSHostingView(rootView: TabbedContentView(tabs: tabs).defaultAppStorage(defaults))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 800),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host
@@ -549,6 +550,34 @@ enum Checks {
         wait("restored info bars") { zip(views, heights).allSatisfy { abs($0.frame.height - $1) < 1 } }
         precondition(abs(views[0].magnification - zoomedScale) < 0.001,
                      "Showing info bars must retain manual zoom")
+
+        let originalAppearance = NSApp.appearance
+        defer { NSApp.appearance = originalAppearance }
+        func isDark() -> Bool {
+            host.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        }
+        NSApp.appearance = NSAppearance(named: .aqua)
+        wait("default follows light system appearance") { !isDark() }
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        wait("default follows dark system appearance") { isDark() }
+        defaults.set("light", forKey: "appearance")
+        wait("manual light appearance") { !isDark() }
+        defaults.set("dark", forKey: "appearance")
+        wait("manual dark appearance") { isDark() }
+        NSApp.appearance = NSAppearance(named: .aqua)
+        precondition(isDark(), "Manual appearance must override the system")
+        defaults.set("system", forKey: "appearance")
+        wait("return to system appearance") { !isDark() }
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+        wait("automatic appearance follows subsequent system changes") { isDark() }
+        precondition(images(in: host).count == 3 && zip(images(in: host), views).allSatisfy { $0 === $1 },
+                     "Switching appearance must retain each image view")
+        precondition(abs(views[0].magnification - zoomedScale) < 0.001,
+                     "Switching appearance must retain manual zoom")
+        for symbol in ["trash", "plus.square", "minus.square", "rectangle.split.1x2", "rectangle.split.2x1", "sun.max", "moon"] {
+            precondition(NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil,
+                         "Toolbar symbol must exist: \(symbol)")
+        }
     }
 
     static func checkSession(folder: URL, image: URL) throws {
