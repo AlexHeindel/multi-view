@@ -159,10 +159,12 @@ enum Checks {
         precondition(Catalog.selection(in: [], preserving: nil, oldIndex: 10) == 0)
         precondition(!Catalog.canMove([], by: 1))
         precondition(!Catalog.canMove([(0, 0)], by: 1))
-        precondition(!Catalog.canMove([(0, 3)], by: -1))
+        precondition(!Catalog.canMove([(0, 1)], by: 1))
+        precondition(!Catalog.canMove([(0, 3)], by: 0))
+        precondition(Catalog.canMove([(0, 3)], by: -1))
         precondition(Catalog.canMove([(0, 3), (1, 3)], by: 1))
-        precondition(!Catalog.canMove([(1, 3), (1, 2)], by: 1))
-        precondition(!Catalog.canMove([(0, 3), (1, 2)], by: -1))
+        precondition(Catalog.canMove([(1, 3), (1, 2)], by: 1))
+        precondition(Catalog.canMove([(0, 3), (1, 2)], by: -1))
         let preview = try Loader.shared.raster(at: large, full: false)
         precondition(preview.image.width == 1600 && !preview.fullDetail)
         let full = try Loader.shared.raster(at: large, full: true)
@@ -397,13 +399,38 @@ enum Checks {
         model.move(1, from: left)
         precondition(left.index == 1 && right.index == 1)
         model.move(1, from: left)
-        precondition(left.index == 1 && right.index == 1)
+        precondition(left.index == 2 && right.index == 0)
+        model.move(1, from: left)
+        precondition(left.index == 0 && right.index == 1)
+        model.move(-1, from: left)
+        precondition(left.index == 2 && right.index == 0)
         model.linked = false
         model.move(1, from: left)
-        precondition(left.index == 2 && right.index == 1)
+        precondition(left.index == 0 && right.index == 0)
+        model.move(-1, from: left)
+        precondition(left.index == 2 && right.index == 0)
         model.linked = true
         model.move(-1, from: left)
-        precondition(left.index == 1 && right.index == 0)
+        precondition(left.index == 1 && right.index == 1)
+        model.addPane()
+        let blank = model.active
+        model.move(1, from: left)
+        precondition(left.index == 2 && right.index == 0 && blank.index == 0)
+        blank.files = [small]
+        blank.raster = preview
+        model.move(1, from: left)
+        precondition(left.index == 0 && right.index == 1 && blank.index == 0 && blank.raster === preview)
+        blank.indexing = true
+        precondition(!model.canMove(1, from: left))
+        model.move(1, from: left)
+        precondition(left.index == 0 && right.index == 1)
+        blank.indexing = false
+        model.linked = false
+        precondition(!model.canMove(1, from: blank) && !model.canMove(-1, from: blank))
+        blank.files = []
+        precondition(!model.canMove(1, from: blank))
+        model.move(1, from: blank)
+        precondition(blank.index == 0)
         model.addPane(); model.addPane(); model.addPane()
         precondition(model.panes.count == 4)
         model.cyclePane()

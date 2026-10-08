@@ -219,7 +219,7 @@ struct ContentView: View {
                     .help(colorScheme == .dark ? "Switch to light mode" : "Switch to dark mode")
                 Toggle(isOn: $model.linked) { Label("Link Navigation", systemImage: "link") }
                     .toggleStyle(.button)
-                    .help("Advance all populated panes together (⌘L). Stops when any pane reaches its boundary.")
+                    .help("Advance all populated panes together (⌘L). Each folder loops at its ends.")
                 Button { model.active.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .disabled(model.active.folder == nil).help("Refresh the selected folder (⌘R)")
             }

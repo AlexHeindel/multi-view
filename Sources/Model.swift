@@ -62,7 +62,8 @@ enum Catalog {
     }
 
     static func canMove(_ positions: [(index: Int, count: Int)], by step: Int) -> Bool {
-        !positions.isEmpty && positions.allSatisfy { $0.index + step >= 0 && $0.index + step < $0.count }
+        step != 0 && positions.contains { $0.count > 1 }
+            && positions.allSatisfy { $0.index >= 0 && $0.index < $0.count }
     }
 }
 
@@ -418,8 +419,9 @@ final class WindowModel: ObservableObject {
     func move(_ step: Int, from pane: Pane) {
         activeID = pane.id
         guard canMove(step, from: pane) else { return }
-        for target in targets(from: pane) {
-            target.index += step
+        for target in targets(from: pane) where target.files.count > 1 {
+            let count = target.files.count
+            target.index = (target.index + step % count + count) % count
             target.load()
         }
     }
