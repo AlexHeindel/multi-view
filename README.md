@@ -12,6 +12,7 @@ Multi-view is a native macOS app for comparing images and plots from several fol
 - View PNG, JPEG (`.jpg` and `.jpeg`), TIFF (`.tif` and `.tiff`), GIF, SVG, and PDF files. GIFs animate, SVGs stay sharp when zoomed, and multipage PDFs have page controls.
 - Filter every pane in a tab by file type or show all supported files. Choose a specific file with the macOS file picker, or drop a folder onto a pane.
 - Fit, zoom, and pan images independently. Raster images can display at one image pixel per screen pixel; large rasters load a preview first and fetch full detail when needed.
+- Draw temporary marks independently in each pane, with adjustable pen thickness and color, an eraser, and an option to wipe drawings from every pane.
 - Keep source folders untouched. Files are listed in Finder-style filename order; hidden files and subfolders are skipped.
 
 ## Install from source
@@ -43,6 +44,12 @@ Toggle **Pane Info Bars** (the info-circle button in the top toolbar) to hide th
 
 The app follows your system appearance by default. Click the sun or moon in the top toolbar to switch between light and dark mode; your choice is remembered across tabs and app launches. Choose **Compare → Use System Appearance** to follow macOS again. The pane layout button shows whether panes are arranged horizontally or vertically.
 
+Click the **Markup** pen icon in the top-right toolbar to open the drawing controls and activate the pen. Choose **Pen** to select a color and a line thickness of 2, 4, 8, or 12 pt (4 pt by default). Choose **Eraser** to erase with a fixed 18 pt circular tip; its dashed-circle cursor shows the area being erased. Thickness and color controls appear only for the pen. The same tool settings apply across panes and tabs, while each pane keeps its own drawings.
+
+Click **Done** to close the controls, then drag within any pane to draw or erase. Choose **Navigate** in the markup controls to return to normal pan and zoom gestures; existing marks stay visible. **Wipe All Panes** removes drawings from every tab without changing your files, folders, or layout.
+
+Marks sit over each pane’s viewing area and resize with that pane. They stay in place when you pan, zoom, or browse files, and remain until wiped or the pane is closed. Drawings and tool settings are temporary and are never saved to the session or source images.
+
 Your tabs and selected files are remembered when you close the app. To start over, click **Clear All** in the top toolbar, then confirm with **Clear All** in the pop-up. This clears every tab and pane and the saved session, leaving one blank tab with one pane. Your source files and folders are kept. Choose **Cancel** to keep the current session.
 
 | Action | Shortcut or gesture |
@@ -57,8 +64,9 @@ Your tabs and selected files are remembered when you close the app. To start ove
 | Refresh selected folder | Command-R |
 | Fit image to pane | Command-0 |
 | Actual size | Command-1 |
-| Zoom | Trackpad pinch or scroll |
-| Pan image | Drag |
+| Zoom | Trackpad pinch or scroll in Navigate mode |
+| Pan image | Drag in Navigate mode |
+| Draw / erase temporary marks | Drag in Pen / Eraser mode |
 
 You can drag pane dividers to resize the layout and use **Equalize Panes** to reset it. The **Compare** menu includes **Reveal File in Finder**. PDFs use PDFKit's native 100% scale; raster **1:1** means one image pixel per screen pixel, including on Retina displays.
 

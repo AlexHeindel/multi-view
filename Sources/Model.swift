@@ -141,6 +141,7 @@ enum ViewCommand { case fit, actualSize }
 
 final class Pane: ObservableObject, Identifiable {
     let id = UUID()
+    @Published var markup: [MarkupStroke] = []
     @Published var folder: URL?
     @Published var files: [URL] = []
     var fileFilter: FileFilter = .all
@@ -519,6 +520,7 @@ private struct SavedSession: Codable {
 
 final class TabsModel: ObservableObject {
     static let sessionKey = "viewerSession"
+    let markupSettings = MarkupSettings()
     private let defaults: UserDefaults?
     @Published private(set) var tabs: [ViewerTab]
     @Published var activeID: UUID {
@@ -609,6 +611,10 @@ final class TabsModel: ObservableObject {
                 filter: model.fileFilter, linked: model.linked, stacked: model.stacked)
         }, activeTab: tabs.firstIndex { $0.id == activeID } ?? 0)
         if let data = try? JSONEncoder().encode(saved) { defaults.set(data, forKey: Self.sessionKey) }
+    }
+
+    func wipeMarkup() {
+        tabs.forEach { $0.model.panes.forEach { $0.markup.removeAll() } }
     }
 
     func clearAll() {

@@ -536,9 +536,106 @@ enum Checks {
         precondition(filtered.panes.allSatisfy { $0.files.count == 6 })
         filtered.panes.forEach { $0.close() }
         try checkSession(folder: paired, image: jpeg)
+        checkMarkup()
         checkAppearanceAndInfoBars(raster: full)
-        print("PASS: session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
+        print("PASS: temporary pane markup/erasing/wipe, session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
+    }
+
+    static func checkMarkup() {
+        let suite = "local.multiview.markup.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let tabs = TabsModel(defaults: defaults)
+        let model = tabs.active.model
+        let pane = model.active
+        model.addPane()
+        let otherPane = model.active
+        let settings = tabs.markupSettings
+        let canvas = MarkupCanvas(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        canvas.pane = pane
+        canvas.settings = settings
+        canvas.activate = { model.activeID = pane.id }
+        let window = NSWindow(contentRect: canvas.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = canvas
+        defer { window.orderOut(nil); tabs.close() }
+        precondition(canvas.hitTest(NSPoint(x: 100, y: 50)) == nil,
+                     "Navigate must pass events through to the plot")
+        settings.tool = .pen
+        settings.width = 8
+        settings.color = Color(nsColor: .red)
+        precondition(canvas.hitTest(NSPoint(x: 100, y: 50)) === canvas)
+
+        func event(_ type: NSEvent.EventType, _ point: CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: canvas.convert(point, to: nil), modifierFlags: [],
+                              timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                              eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        canvas.mouseDown(with: event(.leftMouseDown, CGPoint(x: 20, y: 50)))
+        canvas.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: 180, y: 50)))
+        canvas.mouseUp(with: event(.leftMouseUp, CGPoint(x: 180, y: 50)))
+        precondition(pane.markup.count == 1 && otherPane.markup.isEmpty && model.activeID == pane.id,
+                     "Drawing must select and mark only its own pane")
+        precondition(pane.markup[0].width == 8 && !pane.markup[0].erasing)
+        precondition(pane.markup[0].points.first == CGPoint(x: 0.1, y: 0.5))
+
+        func pixel(_ x: Int, _ y: Int) -> [UInt8] {
+            let width = Int(canvas.bounds.width), height = Int(canvas.bounds.height)
+            let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                    bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.setFillColor(NSColor.yellow.cgColor)
+            context.fill(canvas.bounds)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+            canvas.draw(canvas.bounds)
+            NSGraphicsContext.restoreGraphicsState()
+            let bytes = context.data!.assumingMemoryBound(to: UInt8.self)
+            return (0..<4).map { bytes[((height - 1 - y) * width + x) * 4 + $0] }
+        }
+        precondition(pixel(30, 50) == [255, 0, 0, 255], "The pen must render the selected color")
+        precondition(pixel(30, 20) == [255, 255, 0, 255], "Drawing must leave the plot intact")
+        settings.tool = .eraser
+        settings.width = 12
+        canvas.mouseDown(with: event(.leftMouseDown, CGPoint(x: 100, y: 20)))
+        canvas.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: 100, y: 80)))
+        canvas.mouseUp(with: event(.leftMouseUp, CGPoint(x: 100, y: 80)))
+        precondition(pane.markup.last?.width == 18 && settings.width == 12,
+                     "The eraser must use a fixed 18 pt width independently of the pen")
+        precondition(MarkupCanvas.eraserCursor.hotSpot == NSPoint(x: 12, y: 12)
+                     && MarkupCanvas.eraserCursor.image.size == NSSize(width: 24, height: 24),
+                     "The eraser cursor must center its 18 pt ring on the pointer")
+        precondition(pixel(100, 50) == [255, 255, 0, 255], "Erasing must reveal the original plot")
+        precondition(pixel(107, 50) == [255, 255, 0, 255] && pixel(111, 50) == [255, 0, 0, 255],
+                     "The erased footprint must match the 18 pt cursor ring")
+        precondition(pixel(30, 50) == [255, 0, 0, 255], "Erasing must preserve untouched ink")
+        canvas.setFrameSize(NSSize(width: 400, height: 200))
+        precondition(pixel(60, 100) == [255, 0, 0, 255], "Ink must follow pane resizing")
+        precondition(pixel(200, 100) == [255, 255, 0, 255], "Erasing must follow pane resizing")
+        settings.tool = .pen
+        canvas.mouseDown(with: event(.leftMouseDown, CGPoint(x: 300, y: 40)))
+        canvas.mouseUp(with: event(.leftMouseUp, CGPoint(x: 300, y: 40)))
+        precondition(pixel(300, 40) == [255, 0, 0, 255], "A click must draw a dot")
+        settings.tool = .navigate
+        precondition(canvas.hitTest(NSPoint(x: 100, y: 50)) == nil)
+
+        tabs.addTab()
+        let secondTabPane = tabs.active.model.active
+        secondTabPane.markup = [pane.markup[0]]
+        let firstTabID = tabs.tabs[0].id
+        tabs.activeID = firstTabID
+        precondition(pane.markup.count == 3, "Switching tabs must retain temporary ink")
+        tabs.saveSession()
+        let restored = TabsModel(defaults: defaults)
+        precondition(restored.tabs.allSatisfy { $0.model.panes.allSatisfy { $0.markup.isEmpty } },
+                     "Drawings must never enter the saved session")
+        restored.close()
+        let ids = tabs.tabs.map { $0.model.panes.map(\.id) }
+        tabs.wipeMarkup()
+        precondition(tabs.tabs.allSatisfy { $0.model.panes.allSatisfy { $0.markup.isEmpty } })
+        precondition(tabs.tabs.map { $0.model.panes.map(\.id) } == ids && tabs.activeID == firstTabID,
+                     "Wipe must preserve tabs, panes, and selection")
+        precondition(secondTabPane.markup.isEmpty && pixel(30, 50) == [255, 255, 0, 255])
     }
 
     static func checkAppearanceAndInfoBars(raster: Raster) {
@@ -560,8 +657,23 @@ enum Checks {
             if let image = view as? ImageScrollView { return [image] }
             return view.subviews.flatMap { images(in: $0) }
         }
+        func overlays(in view: NSView) -> [MarkupCanvas] {
+            if let overlay = view as? MarkupCanvas { return [overlay] }
+            return view.subviews.flatMap { overlays(in: $0) }
+        }
         wait("three fitted panes") { images(in: host).count == 3 && images(in: host).allSatisfy { $0.magnification > 0.01 } }
         let views = images(in: host)
+        let inkViews = overlays(in: host)
+        precondition(inkViews.count == 3, "Every pane must have its own drawing surface")
+        let inkView = inkViews[0]
+        func hitDrawingSurface() -> Bool {
+            host.hitTest(inkView.convert(NSPoint(x: inkView.bounds.midX, y: inkView.bounds.midY), to: host)) is MarkupCanvas
+        }
+        precondition(!hitDrawingSurface(), "Navigate must allow native plot interaction")
+        tabs.markupSettings.tool = .pen
+        wait("pen receives events above native plot views") { hitDrawingSurface() }
+        tabs.markupSettings.tool = .navigate
+        wait("navigate restores native plot events") { !hitDrawingSurface() }
         let heights = views.map { $0.frame.height }
         let scales = views.map { $0.magnification }
         defaults.set(false, forKey: "showInfoBars")
@@ -601,7 +713,7 @@ enum Checks {
                      "Switching appearance must retain each image view")
         precondition(abs(views[0].magnification - zoomedScale) < 0.001,
                      "Switching appearance must retain manual zoom")
-        for symbol in ["trash", "plus.square", "minus.square", "rectangle.split.1x2", "rectangle.split.2x1", "sun.max", "moon"] {
+        for symbol in ["trash", "plus.square", "minus.square", "rectangle.split.1x2", "rectangle.split.2x1", "sun.max", "moon", "pencil.tip.crop.circle"] {
             precondition(NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil,
                          "Toolbar symbol must exist: \(symbol)")
         }

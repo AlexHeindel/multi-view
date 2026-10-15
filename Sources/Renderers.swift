@@ -249,6 +249,8 @@ final class PlotPDFView: PDFView {
         guard window != nil else { return }
         wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             guard let self, event.window === self.window, !self.isHiddenOrHasHiddenAncestor,
+                  let content = self.window?.contentView,
+                  !(content.hitTest(content.convert(event.locationInWindow, from: nil)) is MarkupCanvas),
                   self.bounds.contains(self.convert(event.locationInWindow, from: nil)),
                   event.scrollingDeltaY != 0 else { return event }
             self.scrollWheel(with: event)

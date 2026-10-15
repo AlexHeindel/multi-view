@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct PaneView: View {
     @ObservedObject var pane: Pane
     @ObservedObject var model: WindowModel
+    @EnvironmentObject private var markupSettings: MarkupSettings
     let showInfoBars: Bool
     @State private var dropTarget = false
     private var selected: Bool { model.activeID == pane.id }
@@ -101,6 +102,7 @@ struct PaneView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay { MarkupOverlay(pane: pane, settings: markupSettings, activate: activate) }
             if let error = pane.detailError {
                 Text(error).font(.caption).foregroundStyle(.orange).padding(6)
             }
@@ -157,6 +159,8 @@ private struct WideDividerAnchor: NSViewRepresentable {
 struct ContentView: View {
     @ObservedObject var model: WindowModel
     @Binding var appearance: String
+    let wipeMarkup: () -> Void
+    @EnvironmentObject private var markupSettings: MarkupSettings
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("showInfoBars") private var showInfoBars = true
     @State private var splitVersion = 0
@@ -222,6 +226,7 @@ struct ContentView: View {
                     .help("Advance all populated panes together (⌘L). Each folder loops at its ends.")
                 Button { model.active.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .disabled(model.active.folder == nil).help("Refresh the selected folder (⌘R)")
+                MarkupControls(settings: markupSettings, wipeAll: wipeMarkup)
             }
         }
     }
@@ -267,7 +272,8 @@ struct TabbedContentView: View {
     }
 
     var body: some View {
-        ContentView(model: tabs.active.model, appearance: $appearance)
+        ContentView(model: tabs.active.model, appearance: $appearance, wipeMarkup: tabs.wipeMarkup)
+            .environmentObject(tabs.markupSettings)
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .id(tabs.activeID)
             .background {
