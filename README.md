@@ -6,9 +6,9 @@ Multi-view is a native macOS app for comparing images and plots from several fol
 
 ## Features
 
-- Open up to eight tabs, each with one to four resizable panes. Every tab keeps its own folders, file filter, selected pane, layout orientation, and linked navigation setting.
-- Reopen the app to restore tabs, names, folders, selected files, filters, pane orientation, and linked navigation. Missing or inaccessible folders reopen as blank panes. **Clear All** in the top toolbar asks for confirmation before clearing the saved session and returning to one blank tab and pane.
-- Browse a different folder in each pane. Use arrows or the keyboard to loop through files, or link navigation to advance populated panes together.
+- Open up to 20 tabs, each with one to four resizable panes. Every tab keeps its own folders, file filter, selected pane, layout orientation, and chained navigation setting.
+- Reopen the app to restore tabs, names, folders, selected files, filters, pane orientation, and chained navigation. Missing or inaccessible folders reopen as blank panes. **Clear All** in the top toolbar asks for confirmation before clearing the saved session and returning to one blank tab and pane.
+- Browse a different folder in each pane. Use arrows or the keyboard to loop through files, or chain navigation to advance populated panes together.
 - View PNG, JPEG (`.jpg` and `.jpeg`), TIFF (`.tif` and `.tiff`), GIF, SVG, and PDF files. GIFs animate, SVGs stay sharp when zoomed, and multipage PDFs have page controls.
 - Filter every pane in a tab by file type or show all supported files. Choose a specific file with the macOS file picker, or drop a folder onto a pane.
 - Fit, zoom, and pan images independently. Raster images can display at one image pixel per screen pixel; large rasters load a preview first and fetch full detail when needed.
@@ -38,7 +38,7 @@ The build script compiles for the current Mac's architecture and ad-hoc signs `b
 
 Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Use **Stack Panes** in the toolbar to arrange panes top to bottom for wide images. Drag tabs to reorder them, or double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved. The tab strip scrolls horizontally when all tabs do not fit. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
 
-Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. Navigation loops: Right advances from the last file to the first, and Left goes from the first file to the last. **Link Navigation** moves populated panes together, with each folder wrapping independently. Empty and single-file panes stay in place.
+Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. Navigation loops: Right advances from the last file to the first, and Left goes from the first file to the last. **Chain Navigation** moves populated panes together, with each folder wrapping independently. Empty and single-file panes stay in place.
 
 Toggle **Pane Info Bars** (the info-circle button in the top toolbar) to hide the folder and file controls in every pane and give fitted images the full pane height. This setting applies across tabs and is remembered when you reopen the app. Keyboard navigation, zoom, pan, and the toolbar remain available while the bars are hidden. Zoom keeps the current panned viewport center steady.
 
@@ -60,7 +60,7 @@ Your tabs and selected files are remembered when you close the app. To start ove
 | New tab | Command-N |
 | Add pane | Command-T |
 | Remove pane (empty pane first) | Command-Shift-W |
-| Toggle linked navigation | Command-L |
+| Toggle chained navigation | Command-L |
 | Refresh selected folder | Command-R |
 | Fit image to pane | Command-0 |
 | Actual size | Command-1 |

@@ -160,6 +160,7 @@ struct ContentView: View {
     @ObservedObject var model: WindowModel
     @Binding var appearance: String
     let wipeMarkup: () -> Void
+    let clearAll: () -> Void
     @EnvironmentObject private var markupSettings: MarkupSettings
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("showInfoBars") private var showInfoBars = true
@@ -190,9 +191,17 @@ struct ContentView: View {
                minHeight: 440)
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Picker("File Type", selection: $model.fileFilter) {
+                    ForEach(FileFilter.allCases, id: \.self) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+                    .pickerStyle(.menu).help("Filter files by format")
                 Button { model.chooseFolder() } label: { Label("Open Folder", systemImage: "folder") }
                     .help("Open folder in the selected pane (⌘O)")
+                Button { model.active.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                    .disabled(model.active.folder == nil).help("Refresh the selected folder (⌘R)")
                 Button { model.addPane() } label: { Label("Add Pane", systemImage: "plus.square") }
                     .disabled(model.panes.count == 4).help("Add a pane (⌘T)")
                 Button { model.removePane() } label: { Label("Remove Pane", systemImage: "minus.square") }
@@ -203,30 +212,22 @@ struct ContentView: View {
                     .toggleStyle(.button)
                     .disabled(model.panes.count == 1)
                     .help("Stack panes top to bottom for wide images")
+                Button { splitVersion += 1 } label: { Label("Equalize Panes", systemImage: "square.split.2x2") }
+                    .disabled(model.panes.count == 1).help("Return panes to equal sizes")
                 Toggle(isOn: $showInfoBars) { Label("Pane Info Bars", systemImage: "info.circle") }
                     .toggleStyle(.button)
                     .help(showInfoBars ? "Hide info bars in all panes to give images more room" : "Show info bars in all panes")
-                Picker("File Type", selection: $model.fileFilter) {
-                    ForEach(FileFilter.allCases, id: \.self) { filter in
-                        Text(filter.rawValue).tag(filter)
-                    }
-                }
-                    .pickerStyle(.menu).help("Filter files by format")
-                Button { splitVersion += 1 } label: { Label("Equalize Panes", systemImage: "square.split.2x2") }
-                    .disabled(model.panes.count == 1).help("Return panes to equal sizes")
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
+                Toggle(isOn: $model.linked) { Label("Chain Navigation", systemImage: "link") }
+                    .toggleStyle(.button)
+                    .help("Advance all populated panes together (⌘L). Each folder loops at its ends.")
+                MarkupControls(settings: markupSettings, wipeAll: wipeMarkup)
                 Button { appearance = colorScheme == .dark ? "light" : "dark" } label: {
                     Label(colorScheme == .dark ? "Dark Mode" : "Light Mode",
                           systemImage: colorScheme == .dark ? "moon" : "sun.max")
                 }
                     .help(colorScheme == .dark ? "Switch to light mode" : "Switch to dark mode")
-                Toggle(isOn: $model.linked) { Label("Link Navigation", systemImage: "link") }
-                    .toggleStyle(.button)
-                    .help("Advance all populated panes together (⌘L). Each folder loops at its ends.")
-                Button { model.active.refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                    .disabled(model.active.folder == nil).help("Refresh the selected folder (⌘R)")
-                MarkupControls(settings: markupSettings, wipeAll: wipeMarkup)
+                Button(action: clearAll) { Label("Clear All", systemImage: "trash") }
+                    .help("Clear the saved session and return to one blank tab and pane")
             }
         }
     }
@@ -272,7 +273,8 @@ struct TabbedContentView: View {
     }
 
     var body: some View {
-        ContentView(model: tabs.active.model, appearance: $appearance, wipeMarkup: tabs.wipeMarkup)
+        ContentView(model: tabs.active.model, appearance: $appearance, wipeMarkup: tabs.wipeMarkup,
+                    clearAll: { confirmingClearAll = true })
             .environmentObject(tabs.markupSettings)
             .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .id(tabs.activeID)
@@ -297,13 +299,25 @@ struct TabbedContentView: View {
                 Text("This clears the saved session and returns to one blank tab and pane. Your files and folders are kept.")
             }
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { confirmingClearAll = true } label: { Label("Clear All", systemImage: "trash") }
-                        .help("Clear the saved session and return to one blank tab and pane")
+                if #available(macOS 26.0, *) {
+                    ToolbarItem(placement: .navigation) {
+                        Text("Multi-view").font(.headline).fixedSize()
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .navigation) {
+                        Text("Multi-view").font(.headline).fixedSize()
+                    }
                 }
-                ToolbarItem(placement: .principal) {
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.flexible, placement: .primaryAction)
+                } else {
+                    ToolbarItem(placement: .primaryAction) { Spacer() }
+                }
+                ToolbarItem(placement: .primaryAction) {
                     ScrollViewReader { scroll in
-                        let availableWidth = max(280, windowWidth - 860)
+                        // Anchor the strip beside the controls, independent of the window buttons and title.
+                        let availableWidth = max(120, windowWidth - 766)
                         let overflowing = tabContentWidth > availableWidth
                         HStack(spacing: 0) {
                             if overflowing {
@@ -357,7 +371,7 @@ struct TabbedContentView: View {
                                         }
                                     }
                                     Button { tabs.addTab() } label: { Image(systemName: "plus") }
-                                        .disabled(tabs.tabs.count == 8)
+                                        .disabled(tabs.tabs.count >= TabsModel.maxTabs)
                                         .help("New tab (⌘N)")
                                         .accessibilityLabel("New tab")
                                         .padding(.horizontal, 8)
@@ -386,6 +400,8 @@ struct TabbedContentView: View {
                                     .frame(width: 22, height: 36)
                             }
                         }
+                        .frame(width: availableWidth, alignment: .leading)
+                        .clipped()
                         .onAppear { revealActiveTab(in: scroll) }
                         .onChange(of: windowWidth) { _, _ in revealActiveTab(in: scroll) }
                         .onChange(of: tabs.tabs.map(\.id)) { _, _ in revealActiveTab(in: scroll) }
@@ -393,6 +409,16 @@ struct TabbedContentView: View {
                             withAnimation { revealActiveTab(in: scroll) }
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+                if #available(macOS 26.0, *) {
+                    ToolbarItem(placement: .primaryAction) {
+                        Color.clear.frame(width: 38, height: 1).accessibilityHidden(true)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .primaryAction) {
+                        Color.clear.frame(width: 38, height: 1).accessibilityHidden(true)
                     }
                 }
             }
@@ -506,10 +532,11 @@ struct MultiViewApp: App {
                 }
             }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1100, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Tab") { tabs.addTab() }.keyboardShortcut("n").disabled(tabs.tabs.count == 8)
+                Button("New Tab") { tabs.addTab() }.keyboardShortcut("n").disabled(tabs.tabs.count >= TabsModel.maxTabs)
                 Button("Close Tab") { tabs.closeTab(tabs.activeID) }.disabled(tabs.tabs.count == 1)
                 Divider()
                 Button("Open Folder…") { tabs.active.model.chooseFolder() }.keyboardShortcut("o")
@@ -522,7 +549,7 @@ struct MultiViewApp: App {
                 Button("Use System Appearance") { appearance = "system" }
                     .disabled(appearance == "system")
                 Divider()
-                Toggle("Link Navigation", isOn: Binding(
+                Toggle("Chain Navigation", isOn: Binding(
                     get: { tabs.active.model.linked }, set: { tabs.active.model.linked = $0 }
                 )).keyboardShortcut("l")
                 Button("Refresh Folder") { tabs.active.model.active.refresh() }.keyboardShortcut("r")

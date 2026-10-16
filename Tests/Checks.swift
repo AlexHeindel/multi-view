@@ -484,17 +484,17 @@ enum Checks {
         precondition(tabs.tabs.map(\.number) == [3, 1, 2])
         tabs.renameTab(secondTab, to: " ")
         precondition(tabs.tabs[2].title == "Tab 2")
-        for _ in 0..<8 { tabs.addTab() }
-        precondition(tabs.tabs.count == 8 && tabs.active.model.panes.count == 1)
+        for _ in 0..<25 { tabs.addTab() }
+        precondition(tabs.tabs.count == 20 && tabs.active.model.panes.count == 1)
         precondition(!tabs.active.model.linked && tabs.tabs.first(where: { $0.id == firstTab })?.model.panes.count == 2)
         tabs.closeTab(firstTab)
-        precondition(tabs.tabs.count == 7 && tabs.active.model.panes.count == 1)
+        precondition(tabs.tabs.count == 19 && tabs.active.model.panes.count == 1)
         precondition(tabs.tabs.first(where: { $0.id == thirdTab })?.number == 3)
         tabs.addTab()
-        precondition(tabs.tabs.count == 8 && Set(tabs.tabs.map(\.number)).count == 8)
+        precondition(tabs.tabs.count == 20 && Set(tabs.tabs.map(\.number)).count == 20)
         precondition(tabs.active.number == 1 && tabs.tabs.first(where: { $0.id == secondTab })?.number == 2)
         tabs.closeTab(tabs.activeID)
-        precondition(tabs.tabs.count == 7 && tabs.tabs.contains { $0.id == tabs.activeID })
+        precondition(tabs.tabs.count == 19 && tabs.tabs.contains { $0.id == tabs.activeID })
         tabs.close()
         let paired = unique.appendingPathComponent("paired")
         try fm.createDirectory(at: paired, withIntermediateDirectories: true)
@@ -807,6 +807,29 @@ enum Checks {
         let corrupt = TabsModel(defaults: defaults)
         precondition(corrupt.tabs.count == 1 && corrupt.active.model.active.folder == nil)
         corrupt.close()
+
+        let full = TabsModel(defaults: defaults)
+        for _ in 0..<25 { full.addTab() }
+        full.renameTab(full.activeID, to: "Last comparison")
+        full.close()
+        let fullSession = TabsModel(defaults: defaults)
+        precondition(fullSession.tabs.map(\.number) == Array(1...20)
+                     && fullSession.active.number == 20 && fullSession.active.title == "Last comparison",
+                     "All 20 tabs and the active tab must survive reopening")
+        fullSession.addTab()
+        precondition(fullSession.tabs.count == 20 && fullSession.active.number == 20)
+        fullSession.close()
+
+        var oversized = try JSONSerialization.jsonObject(with: defaults.data(forKey: TabsModel.sessionKey)!) as! [String: Any]
+        var savedTabs = oversized["tabs"] as! [[String: Any]]
+        var extra = savedTabs[0]
+        extra["number"] = 21
+        savedTabs.append(extra)
+        oversized["tabs"] = savedTabs
+        defaults.set(try JSONSerialization.data(withJSONObject: oversized), forKey: TabsModel.sessionKey)
+        let rejected = TabsModel(defaults: defaults)
+        precondition(rejected.tabs.count == 1, "Sessions exceeding 20 tabs must be rejected")
+        rejected.close()
     }
 
     static func residentMB() -> Double {

@@ -506,10 +506,10 @@ private struct SavedSession: Codable {
     var activeTab: Int
 
     var isValid: Bool {
-        (1...8).contains(tabs.count) && tabs.indices.contains(activeTab)
+        (1...TabsModel.maxTabs).contains(tabs.count) && tabs.indices.contains(activeTab)
             && Set(tabs.map(\.number)).count == tabs.count
             && tabs.allSatisfy {
-                (1...8).contains($0.number) && (1...4).contains($0.panes.count)
+                (1...TabsModel.maxTabs).contains($0.number) && (1...4).contains($0.panes.count)
                     && $0.panes.indices.contains($0.activePane)
                     && $0.panes.allSatisfy { pane in
                         [pane.folder, pane.file].compactMap { $0 }.allSatisfy { $0.hasPrefix("/") }
@@ -519,6 +519,7 @@ private struct SavedSession: Codable {
 }
 
 final class TabsModel: ObservableObject {
+    static let maxTabs = 20
     static let sessionKey = "viewerSession"
     let markupSettings = MarkupSettings()
     private let defaults: UserDefaults?
@@ -570,8 +571,8 @@ final class TabsModel: ObservableObject {
     }
 
     func addTab() {
-        guard tabs.count < 8 else { return }
-        let number = (1...8).first { candidate in !tabs.contains { $0.number == candidate } }!
+        guard tabs.count < Self.maxTabs else { return }
+        let number = (1...Self.maxTabs).first { candidate in !tabs.contains { $0.number == candidate } }!
         let tab = ViewerTab(number: number)
         tabs.append(tab)
         activeID = tab.id
