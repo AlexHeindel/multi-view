@@ -36,7 +36,7 @@ The build script compiles for the current Mac's architecture and ad-hoc signs `b
 
 ## Use
 
-Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Use **Stack Panes** in the toolbar to arrange panes top to bottom for wide images. Drag tabs to reorder them, or double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved. The tab strip scrolls horizontally when all tabs do not fit. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
+Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Use **Stack Panes** in the toolbar to arrange panes top to bottom for wide images. Drag tabs to reorder them, or double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved. The tab strip scrolls horizontally when all tabs do not fit. Selecting a visible tab keeps the strip still; Command-Left and Command-Right switch tabs and scroll only when needed to reveal the selection. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
 
 Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. Navigation loops: Right advances from the last file to the first, and Left goes from the first file to the last. **Chain Navigation** moves populated panes together, with each folder wrapping independently. Empty and single-file panes stay in place.
 
@@ -58,6 +58,7 @@ Your tabs and selected files are remembered when you close the app. To start ove
 | Next / previous pane | Tab / Shift-Tab |
 | Open folder in selected pane | Command-O |
 | New tab | Command-N |
+| Previous / next tab | Command-Left / Command-Right |
 | Add pane | Command-T |
 | Remove pane (empty pane first) | Command-Shift-W |
 | Toggle chained navigation | Command-L |
@@ -74,7 +75,7 @@ You can drag pane dividers to resize the layout and use **Equalize Panes** to re
 
 Run the checks with `./build.sh test`. An optional large-image stress check is available with `./build.sh stress`; it creates 40,000 hard-linked fixture entries and loads four 49-megapixel images, so it uses substantial memory and disk space. Generated files stay in the ignored `.build/` and `build/` directories.
 
-Folder indexing and image decoding run off the main thread. Raster previews are limited to 1600 pixels on their longest edge, and full-resolution images are requested when zoom requires them. Switching tabs releases decoded images from the hidden tab. Sessions are saved locally on exit using folder and file paths; moved folders are not followed. Pane sizes and zoom reset on reopening. Folders are not watched for changes; use **Refresh** to rescan a folder.
+Folder indexing and image decoding run off the main thread. Raster previews are limited to 1600 pixels on their longest edge, and full-resolution images are requested when zoom requires them. Browsing keeps the previous plot visible until the selected file is ready; outdated loads are cancelled. Switching tabs releases decoded images from the hidden tab. Sessions are saved locally on exit using folder and file paths; moved folders are not followed. Pane sizes and zoom reset on reopening. Folders are not watched for changes; use **Refresh** to rescan a folder.
 
 ## License
 

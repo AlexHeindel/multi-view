@@ -72,8 +72,6 @@ struct PaneView: View {
                 Color(nsColor: .underPageBackgroundColor)
                 if pane.indexing {
                     status("Reading folder…", symbol: nil, progress: true)
-                } else if pane.loading {
-                    status("Loading plot…", symbol: nil, progress: true)
                 } else if let error = pane.error {
                     status(error, symbol: "exclamationmark.triangle", progress: false)
                 } else if let raster = pane.raster {
@@ -82,6 +80,8 @@ struct PaneView: View {
                     NativeImageView(pane: pane, image: image, activate: activate)
                 } else if let pdf = pane.pdf {
                     DocumentView(pane: pane, document: pdf, activate: activate)
+                } else if pane.loading {
+                    status("Loading plot…", symbol: nil, progress: true)
                 } else {
                     VStack(spacing: 14) {
                         Image(systemName: pane.folder == nil ? "photo.on.rectangle.angled" : "photo")
@@ -246,7 +246,6 @@ struct TabbedContentView: View {
     @State private var windowWidth: CGFloat = 1100
     @State private var tabContentWidth: CGFloat = 0
     @State private var scrollIndex = 0
-    @FocusState private var nameFocused: Bool
 
     private func beginRename(_ tab: ViewerTab) {
         editingID = tab.id
@@ -257,13 +256,13 @@ struct TabbedContentView: View {
         guard let editingID else { return }
         tabs.renameTab(editingID, to: draftName)
         self.editingID = nil
-        nameFocused = false
     }
 
-    private func revealActiveTab(in scroll: ScrollViewProxy) {
-        let last = tabs.activeID == tabs.tabs.last?.id
-        scrollIndex = last ? tabs.tabs.count : tabs.tabs.firstIndex(where: { $0.id == tabs.activeID }) ?? 0
-        scroll.scrollTo(last ? AnyHashable("plus") : AnyHashable(tabs.activeID), anchor: .trailing)
+    private func revealActiveTab(in scroll: ScrollViewProxy, includeAddButton: Bool = false) {
+        let showAddButton = includeAddButton && tabs.activeID == tabs.tabs.last?.id
+        scrollIndex = showAddButton ? tabs.tabs.count : tabs.tabs.firstIndex(where: { $0.id == tabs.activeID }) ?? 0
+        // Without an anchor, visible tabs stay put and offscreen tabs scroll only as far as needed.
+        scroll.scrollTo(showAddButton ? AnyHashable("plus") : AnyHashable(tabs.activeID))
     }
 
     private func scrollTabs(_ direction: Int, in scroll: ScrollViewProxy) {
@@ -285,13 +284,9 @@ struct TabbedContentView: View {
                         .onChange(of: geometry.size.width) { _, width in windowWidth = width }
                 }
             }
-            .onChange(of: nameFocused) { _, focused in
-                if !focused { finishRename() }
-            }
             .alert("Clear all tabs and panes?", isPresented: $confirmingClearAll) {
                 Button("Clear All", role: .destructive) {
                     editingID = nil
-                    nameFocused = false
                     tabs.clearAll()
                 }
                 Button("Cancel", role: .cancel) {}
@@ -332,19 +327,18 @@ struct TabbedContentView: View {
                                     ForEach(tabs.tabs) { tab in
                                         HStack(spacing: 6) {
                                             if editingID == tab.id {
-                                                TextField("Name", text: $draftName)
-                                                    .textFieldStyle(.roundedBorder)
-                                                    .frame(width: 120)
-                                                    .focused($nameFocused)
-                                                    .onAppear { nameFocused = true }
-                                                    .onSubmit { finishRename() }
-                                                    .onExitCommand {
-                                                        editingID = nil
-                                                        nameFocused = false
-                                                    }
+                                                TabNameEditor(text: $draftName, commit: {
+                                                    if editingID == tab.id { finishRename() }
+                                                }, cancel: {
+                                                    if editingID == tab.id { editingID = nil }
+                                                })
                                             } else {
                                                 Button { tabs.activeID = tab.id } label: {
-                                                    Text(tab.title).lineLimit(1).frame(maxWidth: 160)
+                                                    ZStack {
+                                                        Text(tab.title).fontWeight(.semibold).hidden()
+                                                        Text(tab.title)
+                                                    }
+                                                    .lineLimit(1).frame(maxWidth: 160)
                                                 }
                                                 .accessibilityLabel(tab.title)
                                                 .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(tab) })
@@ -404,7 +398,7 @@ struct TabbedContentView: View {
                         .clipped()
                         .onAppear { revealActiveTab(in: scroll) }
                         .onChange(of: windowWidth) { _, _ in revealActiveTab(in: scroll) }
-                        .onChange(of: tabs.tabs.map(\.id)) { _, _ in revealActiveTab(in: scroll) }
+                        .onChange(of: tabs.tabs.map(\.id)) { _, _ in revealActiveTab(in: scroll, includeAddButton: true) }
                         .onChange(of: tabs.activeID) { _, _ in
                             withAnimation { revealActiveTab(in: scroll) }
                         }
@@ -422,6 +416,32 @@ struct TabbedContentView: View {
                     }
                 }
             }
+    }
+}
+
+struct TabNameEditor: View {
+    @Binding var text: String
+    let commit: () -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("Name", text: $text)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .frame(width: 120)
+            .background(.background, in: RoundedRectangle(cornerRadius: 4))
+            .overlay {
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(focused ? Color.accentColor : Color.secondary.opacity(0.4), lineWidth: 1)
+            }
+            .focused($focused)
+            .onAppear { DispatchQueue.main.async { focused = true } }
+            .onChange(of: focused) { _, isFocused in
+                if !isFocused { commit() }
+            }
+            .onSubmit(commit)
+            .onExitCommand(perform: cancel)
     }
 }
 
@@ -538,6 +558,12 @@ struct MultiViewApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { tabs.addTab() }.keyboardShortcut("n").disabled(tabs.tabs.count >= TabsModel.maxTabs)
                 Button("Close Tab") { tabs.closeTab(tabs.activeID) }.disabled(tabs.tabs.count == 1)
+                Button("Previous Tab") { tabs.moveTabSelection(-1) }
+                    .keyboardShortcut(.leftArrow, modifiers: .command)
+                    .disabled(tabs.activeID == tabs.tabs.first?.id)
+                Button("Next Tab") { tabs.moveTabSelection(1) }
+                    .keyboardShortcut(.rightArrow, modifiers: .command)
+                    .disabled(tabs.activeID == tabs.tabs.last?.id)
                 Divider()
                 Button("Open Folder…") { tabs.active.model.chooseFolder() }.keyboardShortcut("o")
                 Button("Add Pane") { tabs.active.model.addPane() }.keyboardShortcut("t")

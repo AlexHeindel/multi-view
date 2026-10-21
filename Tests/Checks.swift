@@ -380,8 +380,14 @@ enum Checks {
         pane.load()
         wait("preview") { pane.raster != nil }
         pane.requestFullDetail()
+        let previousRaster = pane.raster
+        let previousCommand = pane.commandNumber
         pane.index = 1
         pane.load()
+        precondition(pane.raster === previousRaster && pane.loading && pane.commandNumber == previousCommand,
+                     "Keep the previous image and viewport while its replacement loads")
+        pane.requestFullDetail()
+        precondition(!pane.loadingDetail, "Never request new-file detail for the previous raster")
         wait("stale full-detail result") { !pane.loading }
         precondition(pane.raster == nil && pane.error != nil && !pane.loadingDetail)
         pane.files = [report]
@@ -389,6 +395,22 @@ enum Checks {
         pane.load()
         wait("PDF") { !pane.loading }
         precondition(pane.pdf?.pageCount == 3)
+        let previousPDF = pane.pdf
+        pane.pdfPage = 2
+        pane.files = [animation]
+        pane.load()
+        precondition(pane.pdf === previousPDF && pane.pdfPage == 2 && pane.loading)
+        wait("PDF to animated image") { !pane.loading }
+        precondition(pane.pdf == nil && pane.nativeImage != nil && pane.pdfPage == 0)
+        let previousImage = pane.nativeImage
+        pane.files = [small]
+        pane.load()
+        precondition(pane.nativeImage === previousImage && pane.loading)
+        wait("animated image to raster") { !pane.loading }
+        precondition(pane.nativeImage == nil && pane.raster != nil)
+        pane.files = []
+        pane.load()
+        precondition(pane.raster == nil && !pane.loading, "An empty selection must clear the old image")
         pane.close()
 
         let model = WindowModel()
@@ -482,6 +504,18 @@ enum Checks {
         precondition(tabs.tabs.map(\.number) == [3, 2, 1])
         precondition(tabs.moveTab(firstTab, to: secondTab))
         precondition(tabs.tabs.map(\.number) == [3, 1, 2])
+        let order = tabs.tabs.map(\.id)
+        tabs.moveTabSelection(-1)
+        precondition(tabs.activeID == thirdTab, "Previous at the first tab stays at the first tab")
+        tabs.moveTabSelection(1)
+        precondition(tabs.activeID == firstTab, "Tab shortcuts follow the displayed order")
+        tabs.moveTabSelection(1)
+        precondition(tabs.activeID == secondTab)
+        tabs.moveTabSelection(1)
+        precondition(tabs.activeID == secondTab, "Next at the last tab stays at the last tab")
+        tabs.moveTabSelection(-1)
+        precondition(tabs.activeID == firstTab && tabs.tabs.map(\.id) == order)
+        tabs.activeID = thirdTab
         tabs.renameTab(secondTab, to: " ")
         precondition(tabs.tabs[2].title == "Tab 2")
         for _ in 0..<25 { tabs.addTab() }
@@ -537,9 +571,65 @@ enum Checks {
         filtered.panes.forEach { $0.close() }
         try checkSession(folder: paired, image: jpeg)
         checkMarkup()
+        checkRenameFocus()
+        checkSmoothLoading(first: small, next: large)
         checkAppearanceAndInfoBars(raster: full)
-        print("PASS: temporary pane markup/erasing/wipe, session restore/reset, pane removal, tab reorder/rename/numbering, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
+        print("PASS: temporary pane markup/erasing/wipe, session restore/reset, pane removal, tab selection/reorder/rename/numbering, smooth rapid browsing, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
+    }
+
+    static func checkRenameFocus() {
+        let host = NSHostingView(rootView: TabNameEditor(text: .constant("Comparison"), commit: {}, cancel: {}))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 50),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        func field(in view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField { return field }
+            return view.subviews.lazy.compactMap { field(in: $0) }.first
+        }
+        wait("tab rename receives keyboard focus without another click") {
+            guard let editor = field(in: host)?.currentEditor() else { return false }
+            return window.firstResponder === editor
+        }
+        precondition(field(in: host)?.stringValue == "Comparison")
+    }
+
+    static func checkSmoothLoading(first: URL, next: URL) {
+        let model = WindowModel()
+        let pane = model.active
+        pane.files = [first, next]
+        pane.load()
+        wait("initial smooth-browsing image") { !pane.loading && pane.raster != nil }
+        let previous = pane.raster!
+        let host = NSHostingView(rootView: PaneView(pane: pane, model: model, showInfoBars: true)
+            .environmentObject(MarkupSettings()))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        defer { Loader.shared.decoding.isSuspended = false; window.orderOut(nil); model.close() }
+        func imageView(in view: NSView) -> ImageScrollView? {
+            if let image = view as? ImageScrollView { return image }
+            return view.subviews.lazy.compactMap { imageView(in: $0) }.first
+        }
+        wait("initial image view") { imageView(in: host)?.raster === previous }
+        let originalView = imageView(in: host)!
+        originalView.actualSize()
+        Loader.shared.decoding.isSuspended = true
+        for _ in 0..<21 { model.move(1, from: pane) }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        precondition(pane.loading && pane.index == 1 && pane.raster === previous)
+        precondition(imageView(in: host) === originalView && originalView.raster === previous,
+                     "Rapid browsing must keep the existing image view visible while decoding is pending")
+        Loader.shared.decoding.isSuspended = false
+        wait("final rapid-browsing image") { !pane.loading && pane.raster !== previous }
+        wait("reuse image view for the new raster") { imageView(in: host)?.raster === pane.raster }
+        precondition(imageView(in: host) === originalView && pane.raster?.size == CGSize(width: 2400, height: 1600),
+                     "Only the final requested file replaces the image, using the same renderer")
+        precondition(!pane.loadingDetail && pane.raster?.fullDetail == false,
+                     "Fitting a new image must not decode full resolution using the previous image's zoom")
     }
 
     static func checkMarkup() {

@@ -215,8 +215,12 @@ struct RasterView: NSViewRepresentable {
 
     func updateNSView(_ view: ImageScrollView, context: Context) {
         view.canvas.activate = activate
+        if view.raster !== raster {
+            // Apply the new image's fit before deciding whether its full resolution is needed.
+            view.requestDetail = nil
+            view.display(raster)
+        }
         view.requestDetail = { [weak pane] in pane?.requestFullDetail() }
-        if view.raster !== raster { view.display(raster) }
         view.applyCommand(pane)
     }
 }

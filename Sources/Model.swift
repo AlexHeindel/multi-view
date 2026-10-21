@@ -247,14 +247,16 @@ final class Pane: ObservableObject, Identifiable {
         }
     }
 
-    func cancelLoads() {
+    func cancelLoads(keepingContent: Bool = false) {
         loads.forEach { $0.cancel() }
         loads.removeAll()
         loadNumber += 1
-        raster = nil
-        nativeImage = nil
-        pdf = nil
-        pdfPage = 0
+        if !keepingContent {
+            raster = nil
+            nativeImage = nil
+            pdf = nil
+            pdfPage = 0
+        }
         loading = false
         loadingDetail = false
         detailRequested = false
@@ -273,9 +275,8 @@ final class Pane: ObservableObject, Identifiable {
     }
 
     func load() {
-        cancelLoads()
+        cancelLoads(keepingContent: current != nil)
         error = nil
-        view(.fit)
         guard let url = current else { return }
         loading = true
         let number = loadNumber
@@ -307,7 +308,11 @@ final class Pane: ObservableObject, Identifiable {
                         self.raster = content.0
                         self.pdf = content.1
                         self.nativeImage = content.2
-                    case .failure(let error): self.error = error.localizedDescription
+                        self.pdfPage = 0
+                        self.view(.fit)
+                    case .failure(let error):
+                        self.cancelLoads()
+                        self.error = error.localizedDescription
                     }
                     self.prefetch()
                 }
@@ -318,7 +323,7 @@ final class Pane: ObservableObject, Identifiable {
     }
 
     func requestFullDetail() {
-        guard let url = current, let raster, !raster.fullDetail, !detailRequested else { return }
+        guard !loading, let url = current, let raster, !raster.fullDetail, !detailRequested else { return }
         detailRequested = true
         loadingDetail = true
         let number = loadNumber
@@ -577,6 +582,12 @@ final class TabsModel: ObservableObject {
         tabs.append(tab)
         activeID = tab.id
         observeTabs()
+    }
+
+    func moveTabSelection(_ step: Int) {
+        guard let index = tabs.firstIndex(where: { $0.id == activeID }),
+              tabs.indices.contains(index + step) else { return }
+        activeID = tabs[index + step].id
     }
 
     func closeTab(_ id: UUID) {
