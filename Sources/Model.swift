@@ -701,6 +701,21 @@ final class TabsModel: ObservableObject {
         return true
     }
 
+    /// The insertion index refers to the tabs remaining after removing the group.
+    @discardableResult
+    func insertGroup(_ id: UUID, at index: Int) -> Bool {
+        guard groups.first(where: { $0.id == id })?.collapsed == true else { return false }
+        let members = tabs.filter { $0.groupID == id }
+        var remaining = tabs.filter { $0.groupID != id }
+        guard !members.isEmpty, (0...remaining.count).contains(index) else { return false }
+        if index > 0, index < remaining.count,
+           let previous = remaining[index - 1].groupID, previous == remaining[index].groupID { return false }
+        remaining.insert(contentsOf: members, at: index)
+        guard remaining.map(\.id) != tabs.map(\.id) else { return false }
+        tabs = remaining
+        return true
+    }
+
     @discardableResult
     func createGroup(for id: UUID) -> UUID? {
         guard let source = tabs.firstIndex(where: { $0.id == id }) else { return nil }

@@ -27,7 +27,7 @@ final class TabBarView: NSView {
     private var previousSelection: TabBarItem?
     private var previousCount = 0
     private var snapshot = ""
-    private var dragging: UUID?
+    private var dragging: TabBarItem?
     private var dragOffset: CGFloat = 0
     private var dragWindowPoint = NSPoint.zero
     private var previewTabs: [ViewerTab] = []
@@ -143,7 +143,7 @@ final class TabBarView: NSView {
                       groupID: tab.groupID, collapsed: false, count: 0)
             order.append(key)
         }
-        for (key, item) in items { item.isHidden = !order.contains(key) && key != dragging.map(TabBarItem.tab) }
+        for (key, item) in items { item.isHidden = !order.contains(key) && key != dragging }
         layoutItems(animate: animate)
     }
 
@@ -161,10 +161,11 @@ final class TabBarView: NSView {
         item.groupColor = groupID.flatMap { id in tabs?.groups.first { $0.id == id }?.color }
         item.collapsed = collapsed
         item.count = count
+        item.isRenaming = editing == key
         item.close.isHidden = editing == key || count > 0 || tabs?.tabs.count == 1
         item.needsDisplay = true
         item.toolTip = count > 0
-            ? "\(title) — Click to expand or collapse; right-click for group options; double-click the name to rename"
+            ? "\(title) — Click to expand or collapse; drag when collapsed to move the group; right-click for options; double-click the name to rename"
             : "\(title) — Double-click to rename; right-click for tab options"
         item.setAccessibilityLabel(count > 0 ? "\(title), \(count) tabs, \(collapsed ? "collapsed" : "expanded")" : title)
         item.setAccessibilityValue(selected ? "Selected" : "")
@@ -183,7 +184,7 @@ final class TabBarView: NSView {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = animate && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0.15 : 0
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            for key in order where key != dragging.map(TabBarItem.tab) {
+            for key in order where key != dragging {
                 guard let item = items[key], let frame = positions[key] else { continue }
                 if context.duration > 0, item.frame.width > 0 { item.animator().frame = frame }
                 else { item.frame = frame }
@@ -283,6 +284,7 @@ final class TabBarView: NSView {
         guard let tabs, let item = items[key] else { return }
         finishRename(save: true)
         editing = key
+        item.isRenaming = true
         let field = NSTextField()
         switch key {
         case .tab(let id): field.stringValue = tabs.tabs.first { $0.id == id }?.name ?? ""
@@ -309,6 +311,7 @@ final class TabBarView: NSView {
         let name = editor.currentEditor()?.string ?? editor.stringValue
         self.editor = nil
         self.editing = nil
+        items[editing]?.isRenaming = false
         editor.delegate = nil
         editor.removeFromSuperview()
         if save {
@@ -381,11 +384,12 @@ final class TabBarView: NSView {
         return menu
     }
 
-    func drag(_ id: UUID, event: NSEvent, start: NSPoint) {
-        guard let tabs, let item = items[.tab(id)] else { return }
+    func drag(_ key: TabBarItem, event: NSEvent, start: NSPoint) {
+        guard let tabs, let item = items[key] else { return }
+        if case .group(let id) = key, tabs.groups.first(where: { $0.id == id })?.collapsed != true { return }
         if dragging == nil {
             finishRename(save: true)
-            dragging = id
+            dragging = key
             previewTabs = tabs.tabs
             dragOffset = strip.convert(start, from: nil).x - item.frame.minX
             strip.addSubview(item, positioned: .above, relativeTo: nil)
@@ -408,46 +412,80 @@ final class TabBarView: NSView {
     }
 
     private func updateDrag() {
-        guard let dragging, let tabs, let item = items[.tab(dragging)] else { return }
+        guard let dragging, let tabs, let item = items[dragging] else { return }
         let point = strip.convert(dragWindowPoint, from: nil)
         let x = point.x - dragOffset
         // Cross a neighbor's center before changing slots; the slot itself stays stable under the pointer.
         let center = x + item.frame.width / 2
-        let others = order.filter { $0 != .tab(dragging) }
-        let target = others.first { (positions[$0]?.midX ?? 0) > center }
-        let remaining = tabs.tabs.filter { $0.id != dragging }
-        let index: Int
-        let groupID: UUID?
-        switch target {
+        let others = order.filter { $0 != dragging }
+        switch dragging {
         case .tab(let id):
-            index = remaining.firstIndex { $0.id == id } ?? remaining.count
-            groupID = remaining.first { $0.id == id }?.groupID
+            let target = others.first { (positions[$0]?.midX ?? 0) > center }
+            let remaining = tabs.tabs.filter { $0.id != id }
+            let index: Int
+            let groupID: UUID?
+            switch target {
+            case .tab(let id):
+                index = remaining.firstIndex { $0.id == id } ?? remaining.count
+                groupID = remaining.first { $0.id == id }?.groupID
+            case .group(let id):
+                index = remaining.firstIndex { $0.groupID == id }
+                    ?? min(tabs.tabs.firstIndex { $0.groupID == id } ?? remaining.count, remaining.count)
+                groupID = nil
+            case nil:
+                index = remaining.count
+                groupID = remaining.last?.groupID
+            }
+            // A collapsed header accepts a tab on its right half, without expanding the group.
+            let preceding = others.last { (positions[$0]?.midX ?? .infinity) <= center }
+            var insertion = index
+            var group = groupID
+            if case .group(let id) = preceding {
+                group = id
+                insertion = remaining.firstIndex { $0.groupID == id } ?? index
+            }
+            if destination?.index != insertion || destination?.groupID != group {
+                destination = (insertion, group)
+                previewTabs = remaining
+                var moved = tabs.tabs.first { $0.id == id }!
+                moved.groupID = group
+                previewTabs.insert(moved, at: insertion)
+                refresh(animate: true)
+            }
         case .group(let id):
-            index = remaining.firstIndex { $0.groupID == id }
-                ?? min(tabs.tabs.firstIndex { $0.groupID == id } ?? remaining.count, remaining.count)
-            groupID = nil
-        case nil:
-            index = remaining.count
-            groupID = remaining.last?.groupID
-        }
-        // A collapsed header accepts a tab on its right half, without expanding the group.
-        let preceding = others.last { (positions[$0]?.midX ?? .infinity) <= center }
-        var insertion = index
-        var group = groupID
-        if case .group(let id) = preceding {
-            group = id
-            insertion = remaining.firstIndex { $0.groupID == id } ?? index
-        }
-        if destination?.index != insertion || destination?.groupID != group {
-            destination = (insertion, group)
-            previewTabs = remaining
-            var moved = tabs.tabs.first { $0.id == dragging }!
-            moved.groupID = group
-            previewTabs.insert(moved, at: insertion)
-            refresh(animate: true)
+            let members = tabs.tabs.filter { $0.groupID == id }
+            let remaining = tabs.tabs.filter { $0.groupID != id }
+            var insertion = remaining.count
+            // Other groups are indivisible drop targets, including their expanded tabs.
+            for key in others {
+                let index: Int
+                let frame: NSRect
+                switch key {
+                case .group(let otherID):
+                    guard let first = remaining.firstIndex(where: { $0.groupID == otherID }) else { continue }
+                    index = first
+                    frame = others.filter { items[$0]?.groupID == otherID }
+                        .compactMap { positions[$0] }.reduce(.null) { $0.union($1) }
+                case .tab(let tabID):
+                    guard let first = remaining.firstIndex(where: { $0.id == tabID }),
+                          remaining[first].groupID == nil, let position = positions[key] else { continue }
+                    index = first
+                    frame = position
+                }
+                if center < frame.midX { insertion = index; break }
+            }
+            if destination?.index != insertion {
+                destination = (insertion, nil)
+                previewTabs = remaining
+                previewTabs.insert(contentsOf: members, at: insertion)
+                refresh(animate: true)
+            }
         }
         item.frame.origin.x = min(max(x, scroll.contentView.bounds.minX), max(0, strip.bounds.width - item.frame.width))
         item.frame.origin.y = 4
+        if case .group(let id) = dragging {
+            groupUnderlines[id]?.frame = NSRect(x: item.frame.minX + 8, y: 37, width: item.frame.width - 16, height: 2)
+        }
     }
 
     func endDrag(commit: Bool) {
@@ -455,8 +493,13 @@ final class TabBarView: NSView {
         autoScroll?.invalidate()
         autoScroll = nil
         self.dragging = nil
-        items[.tab(dragging)]?.alphaValue = 1
-        if commit, let destination { tabs?.insertTab(dragging, at: destination.index, in: destination.groupID) }
+        items[dragging]?.alphaValue = 1
+        if commit, let destination {
+            switch dragging {
+            case .tab(let id): tabs?.insertTab(id, at: destination.index, in: destination.groupID)
+            case .group(let id): tabs?.insertGroup(id, at: destination.index)
+            }
+        }
         destination = nil
         previewTabs = []
         refresh(animate: true)
@@ -547,6 +590,7 @@ final class TabBarItemView: NSView {
     var groupColor: TabGroupColor?
     var collapsed = false
     var count = 0
+    var isRenaming = false { didSet { needsDisplay = true } }
     private var start: NSPoint?
     private var moved = false
     override var isFlipped: Bool { true }
@@ -595,6 +639,7 @@ final class TabBarItemView: NSView {
             NSColor.white.withAlphaComponent(0.4).setStroke()
             background.stroke()
         }
+        guard !isRenaming else { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
@@ -624,10 +669,11 @@ final class TabBarItemView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard case .tab(let id) = key, let start else { return }
+        guard let start else { return }
         if !moved, hypot(event.locationInWindow.x - start.x, event.locationInWindow.y - start.y) < 4 { return }
         moved = true
-        bar?.drag(id, event: event, start: start)
+        if case .group = key, !collapsed { return }
+        bar?.drag(key, event: event, start: start)
     }
 
     override func mouseUp(with event: NSEvent) {

@@ -125,6 +125,7 @@ enum Checks {
             checkTabBar()
             try checkGroups()
             try checkGroupColors()
+            try checkGroupReordering()
             print("PASS: tab dragging, rename focus, tab groups, and group persistence.")
             return
         }
@@ -581,6 +582,7 @@ enum Checks {
         checkTabBar()
         try checkGroups()
         try checkGroupColors()
+        try checkGroupReordering()
         checkSmoothLoading(first: small, next: large)
         checkAppearanceAndInfoBars(raster: full)
         print("PASS: temporary pane markup/erasing/wipe, session restore/reset, pane removal, 40 tabs, animated reorder/edge scrolling/cancel, tab and group renaming, collapsed groups/persistence, smooth rapid browsing, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
@@ -610,11 +612,26 @@ enum Checks {
                 return window.firstResponder === editor
             }
             let input = field(in: bar)!
+            let item = bar.items[key]!
+            let originalTitle = item.title
+            func paintedChrome() -> Data {
+                NSImage(size: item.bounds.size, flipped: true) { rect in
+                    item.draw(rect)
+                    return true
+                }.tiffRepresentation!
+            }
+            let editingImage = paintedChrome()
+            item.title = "This underlying title must not be painted"
+            precondition(paintedChrome() == editingImage,
+                         "The old tab or group name must not render underneath the rename field")
+            item.title = originalTitle
+            precondition(item.close.isHidden)
             let editor = input.currentEditor() as! NSTextView
             editor.string = name
             _ = bar.control(input, textView: editor, doCommandBy: cancel ?
                 #selector(NSResponder.cancelOperation(_:)) : #selector(NSResponder.insertNewline(_:)))
             bar.update(tabs)
+            precondition(!item.isRenaming, "Saving or cancelling must restore the normal label")
         }
         rename(.tab(first), to: "  Renamed  ")
         precondition(tabs.tabs[0].title == "Renamed")
@@ -777,6 +794,82 @@ enum Checks {
         let plainMenu = plainTab.menu(for: event(.rightMouseDown, plainPoint))!
         precondition(plainMenu.indexOfItem(withTitle: "Add to New Group") >= 0,
                      "An ungrouped tab must offer group creation through its context menu")
+        let grouped = TabsModel()
+        defer { grouped.close() }
+        for _ in 1..<6 { grouped.addTab() }
+        let ids = grouped.tabs.map(\.id)
+        let movingGroup = grouped.createGroup(for: ids[0])!
+        grouped.assignTab(ids[1], to: movingGroup)
+        grouped.toggleGroup(movingGroup)
+        let expandedGroup = grouped.createGroup(for: ids[3])!
+        grouped.assignTab(ids[4], to: expandedGroup)
+        bar.update(grouped)
+        bar.layoutSubtreeIfNeeded()
+        let movingHeader = bar.items[.group(movingGroup)]!
+        let lastPlain = bar.items[.tab(ids[5])]!
+        let moveStart = movingHeader.convert(NSPoint(x: movingHeader.bounds.midX, y: 16), to: nil)
+        let moveEnd = lastPlain.convert(NSPoint(x: lastPlain.bounds.maxX - 2, y: 16), to: nil)
+        let originalGroupOrder = grouped.tabs.map(\.id)
+        movingHeader.mouseDown(with: event(.leftMouseDown, moveStart))
+        movingHeader.mouseDragged(with: event(.leftMouseDragged, moveEnd))
+        precondition(grouped.tabs.map(\.id) == originalGroupOrder, "Group dragging previews without changing the model")
+        precondition(abs(bar.groupUnderlines[movingGroup]!.frame.minX - movingHeader.frame.minX - 8) < 0.01,
+                     "A dragged group keeps its colored underline attached")
+        movingHeader.mouseUp(with: event(.leftMouseUp, moveEnd))
+        precondition(grouped.tabs.map(\.id) == [ids[2], ids[3], ids[4], ids[5], ids[0], ids[1]])
+        precondition(grouped.groups.first { $0.id == movingGroup }!.collapsed,
+                     "Dropping a group must not expand it")
+        bar.update(grouped)
+        let cancelStart = movingHeader.convert(NSPoint(x: movingHeader.bounds.midX, y: 16), to: nil)
+        let firstPlain = bar.items[.tab(ids[2])]!
+        let cancelEnd = firstPlain.convert(NSPoint(x: 1, y: 16), to: nil)
+        let beforeCancel = grouped.tabs.map(\.id)
+        movingHeader.mouseDown(with: event(.leftMouseDown, cancelStart))
+        movingHeader.mouseDragged(with: event(.leftMouseDragged, cancelEnd))
+        bar.endDrag(commit: false)
+        movingHeader.mouseUp(with: event(.leftMouseUp, cancelEnd))
+        precondition(grouped.tabs.map(\.id) == beforeCancel)
+        let fixedHeader = bar.items[.group(expandedGroup)]!
+        let fixedStart = fixedHeader.convert(NSPoint(x: fixedHeader.bounds.midX, y: 16), to: nil)
+        let fixedEnd = NSPoint(x: fixedStart.x + 100, y: fixedStart.y)
+        fixedHeader.mouseDown(with: event(.leftMouseDown, fixedStart))
+        fixedHeader.mouseDragged(with: event(.leftMouseDragged, fixedEnd))
+        fixedHeader.mouseUp(with: event(.leftMouseUp, fixedEnd))
+        precondition(grouped.tabs.map(\.id) == beforeCancel && !grouped.groups.first { $0.id == expandedGroup }!.collapsed,
+                     "Dragging an expanded group must neither move nor collapse it")
+    }
+
+    static func checkGroupReordering() throws {
+        let suite = "local.multiview.group-order.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let tabs = TabsModel(defaults: defaults)
+        for _ in 1..<6 { tabs.addTab() }
+        let original = tabs.tabs
+        let selected = tabs.activeID
+        let moving = tabs.createGroup(for: original[1].id)!
+        tabs.assignTab(original[2].id, to: moving)
+        tabs.renameGroup(moving, to: "Move together")
+        tabs.toggleGroup(moving)
+        let fixed = tabs.createGroup(for: original[4].id)!
+        tabs.assignTab(original[5].id, to: fixed)
+        let color = tabs.groups.first { $0.id == moving }!.color
+        precondition(!tabs.insertGroup(fixed, at: 0), "Expanded groups cannot be reordered")
+        precondition(!tabs.insertGroup(moving, at: 3), "Moving a group cannot split another group")
+        precondition(tabs.insertGroup(moving, at: 4))
+        precondition(tabs.tabs.map(\.number) == [1, 4, 5, 6, 2, 3])
+        precondition(tabs.insertGroup(moving, at: 0))
+        precondition(tabs.tabs.map(\.number) == [2, 3, 1, 4, 5, 6] && tabs.activeID == selected)
+        precondition(tabs.tabs.allSatisfy { tab in original.first { $0.id == tab.id }!.model === tab.model })
+        precondition(tabs.groups.first { $0.id == moving }!.title == "Move together"
+                     && tabs.groups.first { $0.id == moving }!.color == color
+                     && tabs.groups.first { $0.id == moving }!.collapsed)
+        tabs.saveSession()
+        let restored = TabsModel(defaults: defaults)
+        precondition(restored.tabs.map(\.number) == [2, 3, 1, 4, 5, 6] && restored.active.number == 6)
+        precondition(restored.groups.first { $0.id == moving }!.color == color
+                     && restored.groups.first { $0.id == moving }!.collapsed)
+        tabs.close(); restored.close()
     }
 
     static func checkGroups() throws {
