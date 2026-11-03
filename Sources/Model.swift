@@ -488,9 +488,49 @@ struct ViewerTab: Identifiable {
     let id = UUID()
     let number: Int
     var name: String?
+    var groupID: UUID?
     let model = WindowModel()
 
     var title: String { name ?? "Tab \(number)" }
+}
+
+enum TabGroupColor: String, CaseIterable, Codable {
+    case gold = "#664d00"
+    case rust = "#6e2a0c"
+    case red = "#691312"
+    case magenta = "#5d0933"
+    case purple = "#291938"
+    case blue = "#042d3a"
+    case teal = "#12403c"
+    case olive = "#475200"
+
+    var name: String { String(describing: self).capitalized }
+    var nsColor: NSColor {
+        let rgb = UInt32(rawValue.dropFirst(), radix: 16)!
+        return NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255,
+                       green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+}
+
+struct TabGroup: Identifiable, Codable {
+    var id = UUID()
+    var name: String?
+    var collapsed = false
+    var color: TabGroupColor?
+
+    var title: String { name ?? "Group" }
+
+    init(color: TabGroupColor) { self.color = color }
+
+    private enum CodingKeys: String, CodingKey { case id, name, collapsed, color }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decodeIfPresent(String.self, forKey: .name)
+        collapsed = try values.decode(Bool.self, forKey: .collapsed)
+        // Missing or unknown colors must not prevent the rest of a session from reopening.
+        color = try? values.decode(TabGroupColor.self, forKey: .color)
+    }
 }
 
 private struct SavedSession: Codable {
@@ -506,9 +546,11 @@ private struct SavedSession: Codable {
         var filter: FileFilter
         var linked: Bool
         var stacked: Bool?
+        var groupID: UUID?
     }
     var tabs: [SavedTab]
     var activeTab: Int
+    var groups: [TabGroup]?
 
     var isValid: Bool {
         (1...TabsModel.maxTabs).contains(tabs.count) && tabs.indices.contains(activeTab)
@@ -520,18 +562,33 @@ private struct SavedSession: Codable {
                         [pane.folder, pane.file].compactMap { $0 }.allSatisfy { $0.hasPrefix("/") }
                     }
             }
+            && validGroups
+    }
+
+    private var validGroups: Bool {
+        let groups = groups ?? []
+        let ids = Set(groups.map(\.id))
+        guard ids.count == groups.count,
+              tabs.allSatisfy({ $0.groupID == nil || ids.contains($0.groupID!) }) else { return false }
+        return groups.allSatisfy { group in
+            let indices = tabs.indices.filter { tabs[$0].groupID == group.id }
+            return !indices.isEmpty && indices.last! - indices.first! + 1 == indices.count
+        }
     }
 }
 
 final class TabsModel: ObservableObject {
-    static let maxTabs = 20
+    static let maxTabs = 40
     static let sessionKey = "viewerSession"
     let markupSettings = MarkupSettings()
     private let defaults: UserDefaults?
     @Published private(set) var tabs: [ViewerTab]
+    @Published private(set) var groups: [TabGroup] = []
     @Published var activeID: UUID {
         didSet {
             guard activeID != oldValue else { return }
+            if let groupID = active.groupID, let index = groups.firstIndex(where: { $0.id == groupID }),
+               groups[index].collapsed { groups[index].collapsed = false }
             tabs.first(where: { $0.id == oldValue })?.model.panes.forEach { $0.cancelLoads() }
             tabs.first(where: { $0.id == activeID })?.model.panes.forEach {
                 if $0.current != nil { $0.load() }
@@ -551,6 +608,7 @@ final class TabsModel: ObservableObject {
             tabs = saved.tabs.map { savedTab in
                 var tab = ViewerTab(number: savedTab.number)
                 tab.name = savedTab.name
+                tab.groupID = savedTab.groupID
                 let model = tab.model
                 for _ in savedTab.panes.dropFirst() { model.addPane() }
                 model.fileFilter = savedTab.filter
@@ -565,6 +623,10 @@ final class TabsModel: ObservableObject {
                 return tab
             }
             activeID = tabs[saved.activeTab].id
+            groups = saved.groups ?? []
+            for index in groups.indices where groups[index].color == nil {
+                groups[index].color = newGroupColor()
+            }
         }
         observeTabs()
     }
@@ -575,11 +637,14 @@ final class TabsModel: ObservableObject {
         }
     }
 
-    func addTab() {
+    func addTab(in groupID: UUID? = nil) {
         guard tabs.count < Self.maxTabs else { return }
+        guard groupID == nil || groups.contains(where: { $0.id == groupID }) else { return }
         let number = (1...Self.maxTabs).first { candidate in !tabs.contains { $0.number == candidate } }!
-        let tab = ViewerTab(number: number)
-        tabs.append(tab)
+        var tab = ViewerTab(number: number)
+        tab.groupID = groupID
+        let index = groupID.flatMap { id in tabs.lastIndex { $0.groupID == id }.map { $0 + 1 } } ?? tabs.count
+        tabs.insert(tab, at: index)
         activeID = tab.id
         observeTabs()
     }
@@ -594,6 +659,7 @@ final class TabsModel: ObservableObject {
         guard tabs.count > 1, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         tabs[index].model.close()
         tabs.remove(at: index)
+        removeEmptyGroups()
         if activeID == id { activeID = tabs[min(index, tabs.count - 1)].id }
         observeTabs()
     }
@@ -603,8 +669,93 @@ final class TabsModel: ObservableObject {
         guard let source = tabs.firstIndex(where: { $0.id == sourceID }),
               let target = tabs.firstIndex(where: { $0.id == targetID }), source != target else { return false }
         let tab = tabs.remove(at: source)
-        tabs.insert(tab, at: target)
+        var moved = tab
+        moved.groupID = tabs.first(where: { $0.id == targetID })?.groupID
+        tabs.insert(moved, at: target)
+        removeEmptyGroups()
         return true
+    }
+
+    /// The insertion index refers to the remaining tabs after removing the source.
+    @discardableResult
+    func insertTab(_ id: UUID, at index: Int, in groupID: UUID?) -> Bool {
+        guard let source = tabs.firstIndex(where: { $0.id == id }),
+              groupID == nil || groups.contains(where: { $0.id == groupID }) else { return false }
+        var remaining = tabs
+        var tab = remaining.remove(at: source)
+        guard (0...remaining.count).contains(index) else { return false }
+        // A group must remain a single contiguous run.
+        if let groupID {
+            let members = remaining.indices.filter { remaining[$0].groupID == groupID }
+            if let first = members.first, let last = members.last,
+               !(first...last + 1).contains(index) { return false }
+        } else if index > 0, index < remaining.count,
+                  let previous = remaining[index - 1].groupID, previous == remaining[index].groupID {
+            return false
+        }
+        tab.groupID = groupID
+        remaining.insert(tab, at: index)
+        guard remaining.map(\.id) != tabs.map(\.id) || tabs[source].groupID != groupID else { return false }
+        tabs = remaining
+        removeEmptyGroups()
+        return true
+    }
+
+    @discardableResult
+    func createGroup(for id: UUID) -> UUID? {
+        guard let source = tabs.firstIndex(where: { $0.id == id }) else { return nil }
+        // Place a split-off group after the old group, rather than splitting its members.
+        let oldGroup = tabs[source].groupID
+        var tab = tabs.remove(at: source)
+        removeEmptyGroups()
+        let group = TabGroup(color: newGroupColor())
+        let index = oldGroup.flatMap { old in tabs.lastIndex { $0.groupID == old }.map { $0 + 1 } } ?? source
+        tab.groupID = group.id
+        tabs.insert(tab, at: index)
+        groups.append(group)
+        return group.id
+    }
+
+    func assignTab(_ id: UUID, to groupID: UUID?) {
+        guard let source = tabs.firstIndex(where: { $0.id == id }), tabs[source].groupID != groupID else { return }
+        let remaining = tabs.filter { $0.id != id }
+        let oldGroup = tabs[source].groupID
+        let destination = groupID ?? oldGroup
+        let index = destination.flatMap { group in remaining.lastIndex { $0.groupID == group }.map { $0 + 1 } }
+            ?? min(source, remaining.count)
+        insertTab(id, at: index, in: groupID)
+    }
+
+    func renameGroup(_ id: UUID, to name: String) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        groups[index].name = trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func newGroupColor() -> TabGroupColor {
+        let used = Set(groups.compactMap(\.color))
+        let available = TabGroupColor.allCases.filter { !used.contains($0) }
+        return available.randomElement() ?? TabGroupColor.allCases.randomElement()!
+    }
+
+    func setGroupColor(_ id: UUID, to color: TabGroupColor) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].color = color
+    }
+
+    func toggleGroup(_ id: UUID) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].collapsed.toggle()
+    }
+
+    func ungroup(_ id: UUID) {
+        for index in tabs.indices where tabs[index].groupID == id { tabs[index].groupID = nil }
+        groups.removeAll { $0.id == id }
+    }
+
+    private func removeEmptyGroups() {
+        let used = Set(tabs.compactMap(\.groupID))
+        groups.removeAll { !used.contains($0.id) }
     }
 
     func renameTab(_ id: UUID, to name: String) {
@@ -620,8 +771,8 @@ final class TabsModel: ObservableObject {
             return SavedSession.SavedTab(number: tab.number, name: tab.name,
                 panes: model.panes.map { SavedSession.SavedPane(folder: $0.folder?.path, file: $0.selectedURL?.path) },
                 activePane: model.panes.firstIndex { $0.id == model.activeID } ?? 0,
-                filter: model.fileFilter, linked: model.linked, stacked: model.stacked)
-        }, activeTab: tabs.firstIndex { $0.id == activeID } ?? 0)
+                filter: model.fileFilter, linked: model.linked, stacked: model.stacked, groupID: tab.groupID)
+        }, activeTab: tabs.firstIndex { $0.id == activeID } ?? 0, groups: groups)
         if let data = try? JSONEncoder().encode(saved) { defaults.set(data, forKey: Self.sessionKey) }
     }
 
@@ -633,6 +784,7 @@ final class TabsModel: ObservableObject {
         tabs.forEach { $0.model.close() }
         let first = ViewerTab(number: 1)
         tabs = [first]
+        groups = []
         activeID = first.id
         observeTabs()
         defaults?.removeObject(forKey: Self.sessionKey)

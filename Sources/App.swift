@@ -240,43 +240,15 @@ struct ContentView: View {
 struct TabbedContentView: View {
     @ObservedObject var tabs: TabsModel
     @AppStorage("appearance") private var appearance = "system"
-    @State private var editingID: UUID?
-    @State private var draftName = ""
     @State private var confirmingClearAll = false
     @State private var windowWidth: CGFloat = 1100
-    @State private var tabContentWidth: CGFloat = 0
-    @State private var scrollIndex = 0
-
-    private func beginRename(_ tab: ViewerTab) {
-        editingID = tab.id
-        draftName = tab.name ?? ""
-    }
-
-    private func finishRename() {
-        guard let editingID else { return }
-        tabs.renameTab(editingID, to: draftName)
-        self.editingID = nil
-    }
-
-    private func revealActiveTab(in scroll: ScrollViewProxy, includeAddButton: Bool = false) {
-        let showAddButton = includeAddButton && tabs.activeID == tabs.tabs.last?.id
-        scrollIndex = showAddButton ? tabs.tabs.count : tabs.tabs.firstIndex(where: { $0.id == tabs.activeID }) ?? 0
-        // Without an anchor, visible tabs stay put and offscreen tabs scroll only as far as needed.
-        scroll.scrollTo(showAddButton ? AnyHashable("plus") : AnyHashable(tabs.activeID))
-    }
-
-    private func scrollTabs(_ direction: Int, in scroll: ScrollViewProxy) {
-        scrollIndex = min(max(scrollIndex + direction, 0), tabs.tabs.count)
-        let target: AnyHashable = scrollIndex == tabs.tabs.count ? AnyHashable("plus") : AnyHashable(tabs.tabs[scrollIndex].id)
-        withAnimation { scroll.scrollTo(target, anchor: direction < 0 ? .leading : .trailing) }
-    }
 
     var body: some View {
         ContentView(model: tabs.active.model, appearance: $appearance, wipeMarkup: tabs.wipeMarkup,
                     clearAll: { confirmingClearAll = true })
             .environmentObject(tabs.markupSettings)
-            .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .id(tabs.activeID)
+            .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
             .background {
                 GeometryReader { geometry in
                     Color.clear
@@ -286,7 +258,6 @@ struct TabbedContentView: View {
             }
             .alert("Clear all tabs and panes?", isPresented: $confirmingClearAll) {
                 Button("Clear All", role: .destructive) {
-                    editingID = nil
                     tabs.clearAll()
                 }
                 Button("Cancel", role: .cancel) {}
@@ -310,100 +281,9 @@ struct TabbedContentView: View {
                     ToolbarItem(placement: .primaryAction) { Spacer() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    ScrollViewReader { scroll in
-                        // Anchor the strip beside the controls, independent of the window buttons and title.
-                        let availableWidth = max(120, windowWidth - 766)
-                        let overflowing = tabContentWidth > availableWidth
-                        HStack(spacing: 0) {
-                            if overflowing {
-                                Button { scrollTabs(-1, in: scroll) } label: { Image(systemName: "chevron.left") }
-                                    .disabled(scrollIndex == 0)
-                                    .help("Scroll tabs left")
-                                    .accessibilityLabel("Scroll tabs left")
-                                    .frame(width: 22, height: 36)
-                            }
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 4) {
-                                    ForEach(tabs.tabs) { tab in
-                                        HStack(spacing: 6) {
-                                            if editingID == tab.id {
-                                                TabNameEditor(text: $draftName, commit: {
-                                                    if editingID == tab.id { finishRename() }
-                                                }, cancel: {
-                                                    if editingID == tab.id { editingID = nil }
-                                                })
-                                            } else {
-                                                Button { tabs.activeID = tab.id } label: {
-                                                    ZStack {
-                                                        Text(tab.title).fontWeight(.semibold).hidden()
-                                                        Text(tab.title)
-                                                    }
-                                                    .lineLimit(1).frame(maxWidth: 160)
-                                                }
-                                                .accessibilityLabel(tab.title)
-                                                .simultaneousGesture(TapGesture(count: 2).onEnded { beginRename(tab) })
-                                            }
-                                            if tabs.tabs.count > 1 {
-                                                Button { tabs.closeTab(tab.id) } label: {
-                                                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
-                                                }
-                                                .accessibilityLabel("Close tab \(tab.number)")
-                                            }
-                                        }
-                                        .font(.system(size: 12, weight: tabs.activeID == tab.id ? .semibold : .regular))
-                                        .foregroundStyle(tabs.activeID == tab.id ? Color.primary : Color.secondary)
-                                        .padding(.horizontal, 12).padding(.vertical, 6)
-                                        .background(tabs.activeID == tab.id ? Color.accentColor.opacity(0.16) : Color.clear,
-                                                    in: RoundedRectangle(cornerRadius: 7))
-                                        .fixedSize()
-                                        .id(tab.id)
-                                        .help("Double-click the tab name to rename; drag to reorder")
-                                        .draggable(tab.id.uuidString)
-                                        .dropDestination(for: String.self) { items, _ in
-                                            guard let source = items.first.flatMap(UUID.init(uuidString:)) else { return false }
-                                            return tabs.moveTab(source, to: tab.id)
-                                        }
-                                    }
-                                    Button { tabs.addTab() } label: { Image(systemName: "plus") }
-                                        .disabled(tabs.tabs.count >= TabsModel.maxTabs)
-                                        .help("New tab (⌘N)")
-                                        .accessibilityLabel("New tab")
-                                        .padding(.horizontal, 8)
-                                        .id("plus")
-                                }
-                                .fixedSize()
-                                .padding(.horizontal, 8)
-                                .background {
-                                    GeometryReader { geometry in
-                                        Color.clear
-                                            .onAppear { tabContentWidth = geometry.size.width }
-                                            .onChange(of: geometry.size.width) { _, width in tabContentWidth = width }
-                                    }
-                                }
-                                .background(TabWheelScrollView { progress in
-                                    let index = Int((progress * CGFloat(tabs.tabs.count)).rounded())
-                                    if index != scrollIndex { scrollIndex = index }
-                                })
-                            }
-                            .frame(width: min(max(40, tabContentWidth), availableWidth - (overflowing ? 44 : 0)), height: 36)
-                            if overflowing {
-                                Button { scrollTabs(1, in: scroll) } label: { Image(systemName: "chevron.right") }
-                                    .disabled(scrollIndex == tabs.tabs.count)
-                                    .help("Scroll tabs right")
-                                    .accessibilityLabel("Scroll tabs right")
-                                    .frame(width: 22, height: 36)
-                            }
-                        }
-                        .frame(width: availableWidth, alignment: .leading)
-                        .clipped()
-                        .onAppear { revealActiveTab(in: scroll) }
-                        .onChange(of: windowWidth) { _, _ in revealActiveTab(in: scroll) }
-                        .onChange(of: tabs.tabs.map(\.id)) { _, _ in revealActiveTab(in: scroll, includeAddButton: true) }
-                        .onChange(of: tabs.activeID) { _, _ in
-                            withAnimation { revealActiveTab(in: scroll) }
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    NativeTabBar(tabs: tabs)
+                        .frame(width: max(120, windowWidth - 766), height: 40)
+                        .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
                 }
                 if #available(macOS 26.0, *) {
                     ToolbarItem(placement: .primaryAction) {
@@ -417,83 +297,6 @@ struct TabbedContentView: View {
                 }
             }
     }
-}
-
-struct TabNameEditor: View {
-    @Binding var text: String
-    let commit: () -> Void
-    let cancel: () -> Void
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        TextField("Name", text: $text)
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .frame(width: 120)
-            .background(.background, in: RoundedRectangle(cornerRadius: 4))
-            .overlay {
-                RoundedRectangle(cornerRadius: 4)
-                    .strokeBorder(focused ? Color.accentColor : Color.secondary.opacity(0.4), lineWidth: 1)
-            }
-            .focused($focused)
-            .onAppear { DispatchQueue.main.async { focused = true } }
-            .onChange(of: focused) { _, isFocused in
-                if !isFocused { commit() }
-            }
-            .onSubmit(commit)
-            .onExitCommand(perform: cancel)
-    }
-}
-
-private struct TabWheelScrollView: NSViewRepresentable {
-    let onScroll: (CGFloat) -> Void
-
-    final class View: NSView {
-        private var wheelMonitor: Any?
-        var onScroll: (CGFloat) -> Void = { _ in }
-
-        private func reportPosition() {
-            guard let scrollView = enclosingScrollView, let document = scrollView.documentView else { return }
-            let distance = max(0, document.frame.width - scrollView.contentView.bounds.width)
-            onScroll(distance == 0 ? 0 : scrollView.contentView.bounds.minX / distance)
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) }
-            wheelMonitor = nil
-            guard window != nil else { return }
-            wheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                guard let self, event.window === self.window,
-                      let scrollView = self.enclosingScrollView,
-                      let document = scrollView.documentView else { return event }
-                let clip = scrollView.contentView
-                guard clip.bounds.contains(clip.convert(event.locationInWindow, from: nil)),
-                      document.frame.width > clip.bounds.width else { return event }
-                if abs(event.scrollingDeltaX) >= 0.5 {
-                    DispatchQueue.main.async { [weak self] in self?.reportPosition() }
-                    return event
-                }
-                guard event.scrollingDeltaY != 0 else { return event }
-                let step = event.hasPreciseScrollingDeltas ? 1.0 : 40.0
-                let x = min(max(clip.bounds.minX - event.scrollingDeltaY * step, 0),
-                            document.frame.width - clip.bounds.width)
-                clip.scroll(to: NSPoint(x: x, y: clip.bounds.minY))
-                scrollView.reflectScrolledClipView(clip)
-                self.reportPosition()
-                return nil
-            }
-        }
-
-        deinit { if let wheelMonitor { NSEvent.removeMonitor(wheelMonitor) } }
-    }
-
-    func makeNSView(context: Context) -> View {
-        let view = View()
-        view.onScroll = onScroll
-        return view
-    }
-    func updateNSView(_ view: View, context: Context) { view.onScroll = onScroll }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {

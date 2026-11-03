@@ -6,8 +6,10 @@ Multi-view is a native macOS app for comparing images and plots from several fol
 
 ## Features
 
-- Open up to 20 tabs, each with one to four resizable panes. Every tab keeps its own folders, file filter, selected pane, layout orientation, and chained navigation setting.
-- Reopen the app to restore tabs, names, folders, selected files, filters, pane orientation, and chained navigation. Missing or inaccessible folders reopen as blank panes. **Clear All** in the top toolbar asks for confirmation before clearing the saved session and returning to one blank tab and pane.
+- Open up to 40 tabs, each with one to four resizable panes. Every tab keeps its own folders, file filter, selected pane, layout orientation, and chained navigation setting.
+- Reorder tabs with animated drag previews and automatic scrolling at the strip’s edges. Trackpad and mouse-wheel gestures move the toolbar tab strip horizontally, with no vertical bounce.
+- Organize tabs into named, collapsible groups. Each group has a matching colored header and continuous underline, with eight palette colors and no separate group limit. Deleting a group keeps its tabs open.
+- Reopen the app to restore tabs, groups, names, folders, selected files, filters, pane orientation, and chained navigation. Missing or inaccessible folders reopen as blank panes. **Clear All** in the top toolbar asks for confirmation before clearing the saved session and returning to one blank tab and pane.
 - Browse a different folder in each pane. Use arrows or the keyboard to loop through files, or chain navigation to advance populated panes together.
 - View PNG, JPEG (`.jpg` and `.jpeg`), TIFF (`.tif` and `.tiff`), GIF, SVG, and PDF files. GIFs animate, SVGs stay sharp when zoomed, and multipage PDFs have page controls.
 - Filter every pane in a tab by file type or show all supported files. Choose a specific file with the macOS file picker, or drop a folder onto a pane.
@@ -36,7 +38,17 @@ The build script compiles for the current Mac's architecture and ad-hoc signs `b
 
 ## Use
 
-Choose **Open Folder** in a pane to load images. Click the **+** beside the rightmost tab to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Use **Stack Panes** in the toolbar to arrange panes top to bottom for wide images. Drag tabs to reorder them, or double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved. The tab strip scrolls horizontally when all tabs do not fit. Selecting a visible tab keeps the strip still; Command-Left and Command-Right switch tabs and scroll only when needed to reveal the selection. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
+Choose **Open Folder** in a pane to load images. Click the **+** at the right of the tab bar to add a tab, or use **Add Pane** in the toolbar to compare more folders side by side. Use **Stack Panes** in the toolbar to arrange panes top to bottom for wide images. Click a pane to select it; the selected pane has a blue outline. **Remove Pane** closes an empty pane first, if one is available.
+
+The tab strip sits between the app title and toolbar controls. Drag a tab to reorder it; neighboring tabs slide aside to preview the drop position. Drag near either edge to scroll to offscreen tabs, or press Escape to cancel a drag. Trackpad and mouse-wheel scrolling stays horizontal, including diagonal gestures and momentum. Selecting a visible tab keeps the strip still; Command-Left and Command-Right switch tabs and scroll only when needed to reveal the selection.
+
+Double-click a tab label to edit its name. Press Return to save or Escape to cancel. A custom name replaces the numbered label; unnamed tabs keep their original number when moved.
+
+Right-click a tab and choose **Add to New Group** to create a group, **Move to Group** to join an existing one, or **Remove from Group** to return it to the main strip. You can also drag tabs into expanded groups or onto the right half of a collapsed group header. Every tab can start its own group, including when all 40 tabs are open; there is no separate group limit.
+
+Left-click a group header to collapse or expand its tabs. Double-click the name to rename it, using the same Return/Escape controls as individual tabs. Right-click the header for group options: **New Tab in Group** adds a tab when space is available, and **Delete Tab Group…** asks for confirmation before removing the group. Its tabs stay open in the main strip with their names, panes, and contents intact.
+
+Choose **Change Color** in the group menu to select a swatch. The header and continuous underline use the same exact palette color: `#664d00`, `#6e2a0c`, `#691312`, `#5d0933`, `#291938`, `#042d3a`, `#12403c`, or `#475200`. New groups randomly choose an unused color; once all eight are in use, colors are reused without limiting groups. Group names, colors, membership, and collapsed state are saved with the session. Sessions from older versions reopen with colors assigned to their groups.
 
 Use the **File Type** menu to show one format or **All**. Changing the filter keeps the current file when possible and otherwise selects a file with the same name in the chosen format. Navigation loops: Right advances from the last file to the first, and Left goes from the first file to the last. **Chain Navigation** moves populated panes together, with each folder wrapping independently. Empty and single-file panes stay in place.
 
@@ -59,6 +71,10 @@ Your tabs and selected files are remembered when you close the app. To start ove
 | Open folder in selected pane | Command-O |
 | New tab | Command-N |
 | Previous / next tab | Command-Left / Command-Right |
+| Reorder tabs / cancel drag | Drag a tab / Escape |
+| Rename tab or group | Double-click its name; Return saves, Escape cancels |
+| Expand / collapse group | Left-click group header |
+| Tab or group options | Right-click tab or group header |
 | Add pane | Command-T |
 | Remove pane (empty pane first) | Command-Shift-W |
 | Toggle chained navigation | Command-L |
@@ -73,7 +89,7 @@ You can drag pane dividers to resize the layout and use **Equalize Panes** to re
 
 ## Development
 
-Run the checks with `./build.sh test`. An optional large-image stress check is available with `./build.sh stress`; it creates 40,000 hard-linked fixture entries and loads four 49-megapixel images, so it uses substantial memory and disk space. Generated files stay in the ignored `.build/` and `build/` directories.
+Run the checks with `./build.sh test`. These cover the 40-tab limit, drag previews and edge scrolling, diagonal gestures and momentum, group membership and deletion, palette colors, and session compatibility, alongside the image-viewing checks. An optional large-image stress check is available with `./build.sh stress`; it creates 40,000 hard-linked fixture entries and loads four 49-megapixel images, so it uses substantial memory and disk space. Generated files stay in the ignored `.build/` and `build/` directories.
 
 Folder indexing and image decoding run off the main thread. Raster previews are limited to 1600 pixels on their longest edge, and full-resolution images are requested when zoom requires them. Browsing keeps the previous plot visible until the selected file is ready; outdated loads are cancelled. Switching tabs releases decoded images from the hidden tab. Sessions are saved locally on exit using folder and file paths; moved folders are not followed. Pane sizes and zoom reset on reopening. Folders are not watched for changes; use **Refresh** to rescan a folder.
 

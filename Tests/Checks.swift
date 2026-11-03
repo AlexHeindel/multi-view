@@ -121,6 +121,13 @@ enum Checks {
 
     static func main() throws {
         _ = NSApplication.shared
+        if CommandLine.arguments.contains("tabs") {
+            checkTabBar()
+            try checkGroups()
+            try checkGroupColors()
+            print("PASS: tab dragging, rename focus, tab groups, and group persistence.")
+            return
+        }
         let root = URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent(".build/fixtures")
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         let unique = root.appendingPathComponent("check-" + UUID().uuidString)
@@ -518,17 +525,17 @@ enum Checks {
         tabs.activeID = thirdTab
         tabs.renameTab(secondTab, to: " ")
         precondition(tabs.tabs[2].title == "Tab 2")
-        for _ in 0..<25 { tabs.addTab() }
-        precondition(tabs.tabs.count == 20 && tabs.active.model.panes.count == 1)
+        for _ in 0..<45 { tabs.addTab() }
+        precondition(tabs.tabs.count == 40 && tabs.active.model.panes.count == 1)
         precondition(!tabs.active.model.linked && tabs.tabs.first(where: { $0.id == firstTab })?.model.panes.count == 2)
         tabs.closeTab(firstTab)
-        precondition(tabs.tabs.count == 19 && tabs.active.model.panes.count == 1)
+        precondition(tabs.tabs.count == 39 && tabs.active.model.panes.count == 1)
         precondition(tabs.tabs.first(where: { $0.id == thirdTab })?.number == 3)
         tabs.addTab()
-        precondition(tabs.tabs.count == 20 && Set(tabs.tabs.map(\.number)).count == 20)
+        precondition(tabs.tabs.count == 40 && Set(tabs.tabs.map(\.number)).count == 40)
         precondition(tabs.active.number == 1 && tabs.tabs.first(where: { $0.id == secondTab })?.number == 2)
         tabs.closeTab(tabs.activeID)
-        precondition(tabs.tabs.count == 19 && tabs.tabs.contains { $0.id == tabs.activeID })
+        precondition(tabs.tabs.count == 39 && tabs.tabs.contains { $0.id == tabs.activeID })
         tabs.close()
         let paired = unique.appendingPathComponent("paired")
         try fm.createDirectory(at: paired, withIntermediateDirectories: true)
@@ -571,29 +578,347 @@ enum Checks {
         filtered.panes.forEach { $0.close() }
         try checkSession(folder: paired, image: jpeg)
         checkMarkup()
-        checkRenameFocus()
+        checkTabBar()
+        try checkGroups()
+        try checkGroupColors()
         checkSmoothLoading(first: small, next: large)
         checkAppearanceAndInfoBars(raster: full)
-        print("PASS: temporary pane markup/erasing/wipe, session restore/reset, pane removal, tab selection/reorder/rename/numbering, smooth rapid browsing, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
+        print("PASS: temporary pane markup/erasing/wipe, session restore/reset, pane removal, 40 tabs, animated reorder/edge scrolling/cancel, tab and group renaming, collapsed groups/persistence, smooth rapid browsing, image formats, navigation, refresh, drops, stale results, panned zoom, appearance, toolbar symbols, info-bar layout, and multipage PDF.")
         if CommandLine.arguments.contains("stress") { try stress(root: root) }
     }
 
-    static func checkRenameFocus() {
-        let host = NSHostingView(rootView: TabNameEditor(text: .constant("Comparison"), commit: {}, cancel: {}))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 50),
-                              styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = host
+    static func checkTabBar() {
+        let tabs = TabsModel()
+        let first = tabs.activeID
+        tabs.renameTab(first, to: "Comparison")
+        tabs.addTab(); tabs.addTab()
+        let bar = TabBarView(frame: NSRect(x: 0, y: 0, width: 840, height: 40))
+        let window = NSWindow(contentRect: bar.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = bar
         window.makeKeyAndOrderFront(nil)
-        defer { window.orderOut(nil) }
+        defer { window.orderOut(nil); tabs.close() }
+        bar.update(tabs)
+        bar.layoutSubtreeIfNeeded()
         func field(in view: NSView) -> NSTextField? {
             if let field = view as? NSTextField { return field }
             return view.subviews.lazy.compactMap { field(in: $0) }.first
         }
-        wait("tab rename receives keyboard focus without another click") {
-            guard let editor = field(in: host)?.currentEditor() else { return false }
-            return window.firstResponder === editor
+        func rename(_ key: TabBarItem, to name: String, cancel: Bool = false) {
+            bar.beginRename(key)
+            wait("rename \(key) to \(name) receives keyboard focus without another click") {
+                guard let editor = field(in: bar)?.currentEditor() else { return false }
+                return window.firstResponder === editor
+            }
+            let input = field(in: bar)!
+            let editor = input.currentEditor() as! NSTextView
+            editor.string = name
+            _ = bar.control(input, textView: editor, doCommandBy: cancel ?
+                #selector(NSResponder.cancelOperation(_:)) : #selector(NSResponder.insertNewline(_:)))
+            bar.update(tabs)
         }
-        precondition(field(in: host)?.stringValue == "Comparison")
+        rename(.tab(first), to: "  Renamed  ")
+        precondition(tabs.tabs[0].title == "Renamed")
+        rename(.tab(first), to: "Discard", cancel: true)
+        precondition(tabs.tabs[0].title == "Renamed", "Escape cancels renaming")
+        let originalOrder = tabs.tabs.map(\.id)
+        let item = bar.items[.tab(first)]!
+        let last = bar.items[.tab(originalOrder[2])]!
+        func event(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                               clickCount: 1, pressure: 0)!
+        }
+        let start = item.convert(NSPoint(x: item.bounds.midX, y: 16), to: nil)
+        let end = last.convert(NSPoint(x: last.bounds.maxX - 4, y: 16), to: nil)
+        let lastX = last.frame.minX
+        item.mouseDown(with: event(.leftMouseDown, start))
+        item.mouseDragged(with: event(.leftMouseDragged, end))
+        precondition(tabs.tabs.map(\.id) == originalOrder, "Dragging previews without rebuilding tab content")
+        wait("neighboring tabs slide aside before the drop") { last.frame.minX < lastX - 40 }
+        item.mouseUp(with: event(.leftMouseUp, end))
+        precondition(tabs.tabs.map(\.id) == [originalOrder[1], originalOrder[2], first])
+        bar.update(tabs)
+        let groupID = tabs.createGroup(for: first)!
+        tabs.assignTab(originalOrder[2], to: groupID)
+        bar.update(tabs)
+        rename(.group(groupID), to: "  Results  ")
+        precondition(tabs.groups[0].title == "Results")
+        let line = bar.groupUnderlines[groupID]!
+        let beforeColors = tabs.tabs.map(\.id)
+        for color in TabGroupColor.allCases {
+            tabs.setGroupColor(groupID, to: color)
+            bar.update(tabs)
+            precondition(bar.items[.group(groupID)]!.groupColor == color && line.color == color,
+                         "Changing color must immediately update the group header and its underline")
+        }
+        precondition(tabs.tabs.map(\.id) == beforeColors)
+        let palette = bar.menu(for: .group(groupID)).items.first { $0.title == "Change Color" }!.submenu!
+        precondition(palette.items.count == 8 && palette.items.allSatisfy { $0.image != nil })
+        precondition(palette.items.last!.state == .on && palette.items.dropLast().allSatisfy { $0.state == .off })
+        wait("one group underline spans the header, tabs, and gaps") {
+            let header = bar.items[.group(groupID)]!
+            let last = bar.items[.tab(originalOrder[2])]!
+            return abs(line.frame.minX - header.frame.minX - 8) < 0.5
+                && abs(line.frame.maxX - last.frame.maxX + 8) < 0.5
+                && line.frame.minY > last.frame.maxY
+        }
+        rename(.group(groupID), to: "Discard", cancel: true)
+        precondition(tabs.groups[0].title == "Results")
+        let groupHeader = bar.items[.group(groupID)]!
+        let groupClick = groupHeader.convert(NSPoint(x: groupHeader.bounds.midX, y: 16), to: nil)
+        groupHeader.mouseDown(with: event(.leftMouseDown, groupClick))
+        groupHeader.mouseUp(with: event(.leftMouseUp, groupClick))
+        precondition(tabs.groups[0].collapsed, "Left-clicking the group name must collapse it immediately")
+        bar.update(tabs)
+        precondition(bar.items[.tab(first)]!.isHidden && bar.items[.tab(originalOrder[2])]!.isHidden)
+        precondition(!bar.items[.group(groupID)]!.isHidden, "Collapsed groups retain a visible header")
+        wait("collapsed group underline shrinks to its header") {
+            abs(line.frame.width - bar.items[.group(groupID)]!.frame.width + 16) < 0.5
+        }
+        let outside = bar.items[.tab(originalOrder[1])]!
+        let header = bar.items[.group(groupID)]!
+        let outsideStart = outside.convert(NSPoint(x: outside.bounds.midX, y: 16), to: nil)
+        let headerEnd = header.convert(NSPoint(x: header.bounds.width * 0.75, y: 16), to: nil)
+        outside.mouseDown(with: event(.leftMouseDown, outsideStart))
+        outside.mouseDragged(with: event(.leftMouseDragged, headerEnd))
+        outside.mouseUp(with: event(.leftMouseUp, headerEnd))
+        precondition(tabs.tabs.allSatisfy { $0.groupID == groupID } && tabs.groups[0].collapsed,
+                     "Dropping onto a collapsed group joins it without expanding it")
+        let expandClick = groupHeader.convert(NSPoint(x: groupHeader.bounds.midX, y: 16), to: nil)
+        groupHeader.mouseDown(with: event(.leftMouseDown, expandClick))
+        groupHeader.mouseUp(with: event(.leftMouseUp, expandClick))
+        precondition(!tabs.groups[0].collapsed, "Left-clicking a collapsed group must expand it")
+        bar.update(tabs)
+        precondition(!bar.items[.tab(first)]!.isHidden)
+        // Reordering must not scroll back to the selected tab, even when it is offscreen.
+        for _ in 0..<40 { tabs.addTab() }
+        bar.update(tabs)
+        let scroll = bar.subviews.compactMap { $0 as? NSScrollView }.first!
+        scroll.contentView.scroll(to: NSPoint(x: 200, y: 0))
+        for (dx, dy, phase, momentum, shift) in [
+            (-12, -8, NSEvent.Phase.began, NSEvent.Phase(), 12),
+            (-8, -12, .changed, [], 12), (-12, 8, .changed, [], 12),
+            (0, -12, .changed, [], 12), (-12, 0, .ended, [], 12),
+            (-12, -8, [], .began, 12), (-8, -12, [], .changed, 12), (0, 0, [], .ended, 0)
+        ] {
+            let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                             wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)!
+            cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+            cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: Int64(phase.rawValue))
+            cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: Int64(momentum.rawValue))
+            let event = NSEvent(cgEvent: cg)!
+            let expectedX = scroll.contentView.bounds.minX + CGFloat(shift)
+            scroll.scrollWheel(with: event)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            precondition(scroll.contentView.bounds.minY == 0, "Diagonal gestures and momentum must never move tabs vertically")
+            precondition(abs(scroll.contentView.bounds.minX - expectedX) < 0.01,
+                         "Both gesture axes must scroll horizontally without switching to native two-axis scrolling")
+        }
+        scroll.contentView.scroll(to: .zero)
+        let offset = scroll.contentView.bounds.minX
+        tabs.moveTab(tabs.tabs[0].id, to: tabs.tabs[1].id)
+        bar.update(tabs)
+        precondition(scroll.contentView.bounds.minX == offset)
+        let beforeEdgeDrag = tabs.tabs.map(\.id)
+        let edgeItem = bar.items[.tab(tabs.tabs[0].id)]!
+        let edgeStart = edgeItem.convert(NSPoint(x: edgeItem.bounds.midX, y: 16), to: nil)
+        let edgeEnd = scroll.convert(NSPoint(x: scroll.bounds.width - 2, y: 16), to: nil)
+        edgeItem.mouseDown(with: event(.leftMouseDown, edgeStart))
+        edgeItem.mouseDragged(with: event(.leftMouseDragged, edgeEnd))
+        wait("dragging near the edge scrolls to offscreen tabs") { scroll.contentView.bounds.minX > offset + 8 }
+        bar.endDrag(commit: false)
+        edgeItem.mouseUp(with: event(.leftMouseUp, edgeEnd))
+        precondition(tabs.tabs.map(\.id) == beforeEdgeDrag, "Cancelling a drag restores the order")
+        scroll.contentView.scroll(to: .zero)
+        // Keep a rendered strip for visual inspection alongside the fixture outputs.
+        bar.layoutSubtreeIfNeeded()
+        if let bitmap = bar.bitmapImageRepForCachingDisplay(in: bar.bounds) {
+            bar.cacheDisplay(in: bar.bounds, to: bitmap)
+            try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: ".build/tab-bar.png"))
+        }
+        let sole = TabsModel()
+        defer { sole.close() }
+        let soleFirst = sole.activeID
+        sole.addTab()
+        let soleGroup = sole.createGroup(for: soleFirst)!
+        bar.update(sole)
+        bar.layoutSubtreeIfNeeded()
+        let soleItem = bar.items[.tab(soleFirst)]!
+        let soleHeader = bar.items[.group(soleGroup)]!
+        let soleStart = soleItem.convert(NSPoint(x: soleItem.bounds.midX, y: 16), to: nil)
+        let soleEnd = soleHeader.convert(NSPoint(x: 2, y: 16), to: nil)
+        soleItem.mouseDown(with: event(.leftMouseDown, soleStart))
+        soleItem.mouseDragged(with: event(.leftMouseDragged, soleEnd))
+        soleItem.mouseUp(with: event(.leftMouseUp, soleEnd))
+        precondition(sole.tabs[0].id == soleFirst && sole.groups.isEmpty && sole.tabs[0].groupID == nil,
+                     "Dragging a group's only tab before its header ungroups it in place")
+        let deletionGroup = sole.createGroup(for: soleFirst)!
+        sole.assignTab(sole.tabs[1].id, to: deletionGroup)
+        sole.renameGroup(deletionGroup, to: "Keep Tabs")
+        sole.renameTab(soleFirst, to: "Keep this name")
+        sole.tabs[0].model.addPane()
+        sole.toggleGroup(deletionGroup)
+        bar.update(sole)
+        let preservedTabs = sole.tabs
+        let preservedPanes = sole.tabs.map { $0.model.panes.map(\.id) }
+        let preservedSelection = sole.activeID
+        let deletionMenu = bar.menu(for: .group(deletionGroup))
+        let deleteIndex = deletionMenu.indexOfItem(withTitle: "Delete Tab Group…")
+        precondition(deleteIndex >= 0)
+        sole.ungroup(deletionGroup)
+        bar.update(sole)
+        precondition(sole.tabs.map(\.id) == preservedTabs.map(\.id) && sole.activeID == preservedSelection)
+        precondition(zip(sole.tabs, preservedTabs).allSatisfy { $0.title == $1.title && $0.model === $1.model })
+        precondition(sole.tabs.map { $0.model.panes.map(\.id) } == preservedPanes)
+        precondition(sole.tabs.allSatisfy { $0.groupID == nil && bar.items[.tab($0.id)]?.isHidden == false },
+                     "Deleting a collapsed group reveals all its tabs in the main strip")
+        let plainTab = bar.items[.tab(soleFirst)]!
+        let plainPoint = plainTab.convert(NSPoint(x: 30, y: 16), to: nil)
+        let plainMenu = plainTab.menu(for: event(.rightMouseDown, plainPoint))!
+        precondition(plainMenu.indexOfItem(withTitle: "Add to New Group") >= 0,
+                     "An ungrouped tab must offer group creation through its context menu")
+    }
+
+    static func checkGroups() throws {
+        let suite = "local.multiview.groups.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let tabs = TabsModel(defaults: defaults)
+        let first = tabs.activeID
+        tabs.addTab(); let second = tabs.activeID
+        tabs.addTab(); let third = tabs.activeID
+        let group = tabs.createGroup(for: second)!
+        tabs.renameGroup(group, to: "  Runs  ")
+        tabs.assignTab(first, to: group)
+        precondition(tabs.tabs.map(\.id) == [second, first, third])
+        tabs.assignTab(second, to: group)
+        precondition(tabs.tabs.map(\.id) == [second, first, third], "Selecting the current group leaves the order unchanged")
+        precondition(tabs.groups[0].title == "Runs")
+        precondition(!tabs.insertTab(third, at: 1, in: nil), "An ungrouped tab cannot split a group")
+        tabs.toggleGroup(group)
+        precondition(tabs.groups[0].collapsed)
+        tabs.activeID = first
+        precondition(!tabs.groups[0].collapsed, "Keyboard selection reveals a hidden tab")
+        tabs.toggleGroup(group)
+        tabs.saveSession()
+        let restored = TabsModel(defaults: defaults)
+        precondition(restored.groups.count == 1 && restored.groups[0].title == "Runs" && restored.groups[0].collapsed)
+        precondition(restored.tabs.map(\.groupID) == [group, group, nil] && restored.active.number == 1)
+        restored.addTab(in: group)
+        precondition(restored.active.groupID == group && !restored.groups[0].collapsed)
+        precondition(restored.tabs.last?.number == 3)
+        restored.closeTab(restored.activeID)
+        restored.assignTab(restored.tabs[0].id, to: nil)
+        precondition(restored.tabs.map(\.groupID) == [group, nil, nil])
+        let split = restored.createGroup(for: restored.tabs[0].id)!
+        precondition(restored.groups.count == 1 && restored.groups[0].id == split, "Empty groups disappear")
+        restored.renameGroup(split, to: "  ")
+        precondition(restored.groups[0].title == "Group")
+        restored.ungroup(split)
+        precondition(restored.groups.isEmpty && restored.tabs.allSatisfy { $0.groupID == nil })
+        restored.saveSession()
+        let ungrouped = TabsModel(defaults: defaults)
+        precondition(ungrouped.groups.isEmpty && ungrouped.tabs.map(\.number) == restored.tabs.map(\.number))
+        ungrouped.close()
+        tabs.saveSession()
+        var legacy = try JSONSerialization.jsonObject(with: defaults.data(forKey: TabsModel.sessionKey)!) as! [String: Any]
+        legacy.removeValue(forKey: "groups")
+        legacy["tabs"] = (legacy["tabs"] as! [[String: Any]]).map { tab in
+            var tab = tab
+            tab.removeValue(forKey: "groupID")
+            return tab
+        }
+        defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: TabsModel.sessionKey)
+        let oldSession = TabsModel(defaults: defaults)
+        precondition(oldSession.tabs.count == 3 && oldSession.groups.isEmpty)
+        oldSession.close()
+        tabs.clearAll()
+        precondition(tabs.groups.isEmpty && tabs.tabs.count == 1)
+        tabs.close(); restored.close()
+        let full = TabsModel(defaults: defaults)
+        full.clearAll()
+        for _ in 1..<TabsModel.maxTabs { full.addTab() }
+        let fullBar = TabBarView(frame: NSRect(x: 0, y: 0, width: 840, height: 40))
+        fullBar.update(full)
+        for id in full.tabs.map(\.id) {
+            precondition(fullBar.menu(for: .tab(id)).indexOfItem(withTitle: "Add to New Group") >= 0,
+                         "Group creation must remain available at the tab limit, with any number of existing groups")
+            precondition(full.createGroup(for: id) != nil)
+        }
+        precondition(full.groups.count == TabsModel.maxTabs, "Every tab may have its own group; there is no separate group limit")
+        full.saveSession()
+        let allGroups = TabsModel(defaults: defaults)
+        precondition(allGroups.groups.count == TabsModel.maxTabs && allGroups.tabs.allSatisfy { $0.groupID != nil })
+        precondition(allGroups.groups.map(\.color) == full.groups.map(\.color))
+        full.close(); allGroups.close()
+    }
+
+    static func checkGroupColors() throws {
+        let expected: [(TabGroupColor, Int, Int, Int)] = [
+            (.gold, 102, 77, 0), (.rust, 110, 42, 12), (.red, 105, 19, 18), (.magenta, 93, 9, 51),
+            (.purple, 41, 25, 56), (.blue, 4, 45, 58), (.teal, 18, 64, 60), (.olive, 71, 82, 0)
+        ]
+        precondition(TabGroupColor.allCases.map(\.rawValue) ==
+                     ["#664d00", "#6e2a0c", "#691312", "#5d0933", "#291938", "#042d3a", "#12403c", "#475200"])
+        for (color, red, green, blue) in expected {
+            let actual = color.nsColor
+            precondition(abs(actual.redComponent * 255 - CGFloat(red)) < 0.00001
+                         && abs(actual.greenComponent * 255 - CGFloat(green)) < 0.00001
+                         && abs(actual.blueComponent * 255 - CGFloat(blue)) < 0.00001 && actual.alphaComponent == 1)
+        }
+        let suite = "local.multiview.colors.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let tabs = TabsModel(defaults: defaults)
+        let first = tabs.activeID
+        for index in 0..<8 {
+            if index > 0 { tabs.addTab() }
+            tabs.createGroup(for: tabs.activeID)
+        }
+        precondition(Set(tabs.groups.compactMap(\.color)) == Set(TabGroupColor.allCases),
+                     "New groups must use every unused palette color before reusing any")
+        let freed = tabs.groups[0].color!
+        let split = tabs.createGroup(for: first)!
+        precondition(tabs.groups.count == 8 && tabs.groups.first { $0.id == split }!.color == freed,
+                     "Replacing a single-tab group must free its old color before choosing a new one")
+        tabs.ungroup(split)
+        let replacement = tabs.createGroup(for: first)!
+        precondition(tabs.groups.first { $0.id == replacement }!.color == freed,
+                     "A color freed by deleting a group must be available to the next group")
+        tabs.addTab()
+        tabs.createGroup(for: tabs.activeID)
+        precondition(tabs.groups.count == 9 && tabs.groups.allSatisfy { $0.color != nil },
+                     "Exhausting the palette must reuse colors, without limiting groups")
+        let order = tabs.tabs.map(\.id)
+        tabs.setGroupColor(tabs.groups[0].id, to: .red)
+        tabs.setGroupColor(tabs.groups[1].id, to: .red)
+        tabs.renameGroup(tabs.groups[0].id, to: "Colored")
+        tabs.toggleGroup(tabs.groups[0].id)
+        precondition(tabs.tabs.map(\.id) == order && tabs.groups[0].color == .red && tabs.groups[1].color == .red)
+        tabs.saveSession()
+        let restored = TabsModel(defaults: defaults)
+        precondition(restored.groups.map(\.color) == tabs.groups.map(\.color)
+                     && restored.groups[0].title == "Colored" && restored.groups[0].collapsed)
+        let data = defaults.data(forKey: TabsModel.sessionKey)!
+        var legacy = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        legacy["groups"] = (legacy["groups"] as! [[String: Any]]).map { group in
+            var group = group
+            group.removeValue(forKey: "color")
+            return group
+        }
+        defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: TabsModel.sessionKey)
+        let oldColors = TabsModel(defaults: defaults)
+        precondition(oldColors.tabs.count == 9 && oldColors.groups.map(\.id) == tabs.groups.map(\.id)
+                     && oldColors.groups[0].title == "Colored" && oldColors.groups[0].collapsed)
+        precondition(Set(oldColors.groups.prefix(8).compactMap(\.color)).count == 8)
+        var groups = legacy["groups"] as! [[String: Any]]
+        groups[0]["color"] = "unknown"
+        legacy["groups"] = groups
+        defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: TabsModel.sessionKey)
+        let unknown = TabsModel(defaults: defaults)
+        precondition(unknown.tabs.count == 9 && unknown.groups.count == 9 && unknown.groups.allSatisfy { $0.color != nil },
+                     "An unknown saved color must not discard tabs or groups")
+        tabs.close(); restored.close(); oldColors.close(); unknown.close()
     }
 
     static func checkSmoothLoading(first: URL, next: URL) {
@@ -757,7 +1082,8 @@ enum Checks {
         precondition(inkViews.count == 3, "Every pane must have its own drawing surface")
         let inkView = inkViews[0]
         func hitDrawingSurface() -> Bool {
-            host.hitTest(inkView.convert(NSPoint(x: inkView.bounds.midX, y: inkView.bounds.midY), to: host)) is MarkupCanvas
+            // AppKit hitTest takes a point in the receiver's superview coordinates.
+            host.hitTest(inkView.convert(NSPoint(x: inkView.bounds.midX, y: inkView.bounds.midY), to: host.superview)) === inkView
         }
         precondition(!hitDrawingSurface(), "Navigate must allow native plot interaction")
         tabs.markupSettings.tool = .pen
@@ -803,6 +1129,11 @@ enum Checks {
                      "Switching appearance must retain each image view")
         precondition(abs(views[0].magnification - zoomedScale) < 0.001,
                      "Switching appearance must retain manual zoom")
+        func tabBar(in view: NSView) -> TabBarView? {
+            if let bar = view as? TabBarView { return bar }
+            return view.subviews.lazy.compactMap { tabBar(in: $0) }.first
+        }
+        precondition(tabBar(in: host) == nil, "The tab strip must not take up a row in the image content")
         for symbol in ["trash", "plus.square", "minus.square", "rectangle.split.1x2", "rectangle.split.2x1", "sun.max", "moon", "pencil.tip.crop.circle"] {
             precondition(NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil,
                          "Toolbar symbol must exist: \(symbol)")
@@ -899,26 +1230,26 @@ enum Checks {
         corrupt.close()
 
         let full = TabsModel(defaults: defaults)
-        for _ in 0..<25 { full.addTab() }
+        for _ in 0..<45 { full.addTab() }
         full.renameTab(full.activeID, to: "Last comparison")
         full.close()
         let fullSession = TabsModel(defaults: defaults)
-        precondition(fullSession.tabs.map(\.number) == Array(1...20)
-                     && fullSession.active.number == 20 && fullSession.active.title == "Last comparison",
-                     "All 20 tabs and the active tab must survive reopening")
+        precondition(fullSession.tabs.map(\.number) == Array(1...40)
+                     && fullSession.active.number == 40 && fullSession.active.title == "Last comparison",
+                     "All 40 tabs and the active tab must survive reopening")
         fullSession.addTab()
-        precondition(fullSession.tabs.count == 20 && fullSession.active.number == 20)
+        precondition(fullSession.tabs.count == 40 && fullSession.active.number == 40)
         fullSession.close()
 
         var oversized = try JSONSerialization.jsonObject(with: defaults.data(forKey: TabsModel.sessionKey)!) as! [String: Any]
         var savedTabs = oversized["tabs"] as! [[String: Any]]
         var extra = savedTabs[0]
-        extra["number"] = 21
+        extra["number"] = 41
         savedTabs.append(extra)
         oversized["tabs"] = savedTabs
         defaults.set(try JSONSerialization.data(withJSONObject: oversized), forKey: TabsModel.sessionKey)
         let rejected = TabsModel(defaults: defaults)
-        precondition(rejected.tabs.count == 1, "Sessions exceeding 20 tabs must be rejected")
+        precondition(rejected.tabs.count == 1, "Sessions exceeding 40 tabs must be rejected")
         rejected.close()
     }
 
